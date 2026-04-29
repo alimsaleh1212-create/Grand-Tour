@@ -193,34 +193,42 @@ class TestChunkDocument:
 # ─── Embedder ─────────────────────────────────────────────────────────────────
 
 
+def _make_async_http_post(vec: list[float]) -> AsyncMock:
+    """Build an async mock for httpx.AsyncClient.post returning one embedding."""
+    # httpx.Response methods (raise_for_status, json) are synchronous.
+    response = MagicMock()
+    response.raise_for_status = MagicMock()
+    response.json.return_value = {"embedding": {"values": vec}}
+    return AsyncMock(return_value=response)
+
+
 class TestGeminiEmbedder:
     def test_get_embedder_returns_same_instance(self) -> None:
         from app.rag.embedder import get_embedder
 
-        e1 = get_embedder(api_key="fake", model="models/text-embedding-004", embed_dim=768)
-        e2 = get_embedder(api_key="fake", model="models/text-embedding-004", embed_dim=768)
+        e1 = get_embedder(api_key="fake", model="models/gemini-embedding-001", embed_dim=768)
+        e2 = get_embedder(api_key="fake", model="models/gemini-embedding-001", embed_dim=768)
         assert e1 is e2
 
-    def test_embed_batch_raises_on_wrong_dim(self) -> None:
+    @pytest.mark.asyncio
+    async def test_embed_one_raises_on_wrong_dim(self) -> None:
         from app.rag.embedder import GeminiEmbedder
 
         embedder = GeminiEmbedder(api_key="fake", model="m", embed_dim=768)
-
         wrong_vec = [0.0] * 512  # wrong: expected 768
-        with patch("app.rag.embedder.genai.embed_content") as mock_embed:
-            mock_embed.return_value = {"embedding": [wrong_vec]}
+        with patch.object(embedder._http, "post", new=_make_async_http_post(wrong_vec)):
             with pytest.raises(ValueError, match="Expected embedding dim 768"):
-                embedder._embed_batch(["test"], "RETRIEVAL_DOCUMENT")
+                await embedder._embed_one("test", "RETRIEVAL_DOCUMENT")
 
-    def test_embed_batch_accepts_correct_dim(self) -> None:
+    @pytest.mark.asyncio
+    async def test_embed_one_accepts_correct_dim(self) -> None:
         from app.rag.embedder import GeminiEmbedder
 
         embedder = GeminiEmbedder(api_key="fake", model="m", embed_dim=4)
         correct_vec = [0.1, 0.2, 0.3, 0.4]
-        with patch("app.rag.embedder.genai.embed_content") as mock_embed:
-            mock_embed.return_value = {"embedding": [correct_vec]}
-            result = embedder._embed_batch(["test"], "RETRIEVAL_DOCUMENT")
-        assert result == [correct_vec]
+        with patch.object(embedder._http, "post", new=_make_async_http_post(correct_vec)):
+            result = await embedder._embed_one("test", "RETRIEVAL_DOCUMENT")
+        assert result == correct_vec
 
 
 # ─── VectorStore ──────────────────────────────────────────────────────────────

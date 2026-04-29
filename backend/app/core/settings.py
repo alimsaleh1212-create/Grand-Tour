@@ -113,10 +113,11 @@ class Settings(BaseSettings):
     llm_retry_delay: float = 1.0  # seconds; exponential backoff multiplied from this
 
     # ── Embeddings (Gemini) ───────────────────────────────────────────────────
-    # text-embedding-004 supports output_dimensionality 1–768; we use 768 to
-    # match the pgvector column created in the first Alembic migration.
+    # gemini-embedding-001 is the stable 768-dim embedding model available in
+    # the project API key. text-embedding-004 was an earlier alias no longer
+    # accessible on this key. Both produce 768-dim vectors.
     # Changing embed_dim requires a new migration to ALTER the vector column.
-    gemini_embed_model: str = "models/text-embedding-004"
+    gemini_embed_model: str = "models/gemini-embedding-001"
     embed_dim: int = 768
 
     # ── RAG ──────────────────────────────────────────────────────────────────
