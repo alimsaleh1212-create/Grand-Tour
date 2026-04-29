@@ -112,15 +112,11 @@ class Settings(BaseSettings):
     llm_max_retries: int = 3
     llm_retry_delay: float = 1.0  # seconds; exponential backoff multiplied from this
 
-    # ── Embeddings (Ollama) ───────────────────────────────────────────────────
-    # Full URL including protocol — httpx.AsyncClient needs it as base_url.
-    # In docker-compose this resolves via the service name "ollama".
-    # For local dev outside Docker: http://localhost:11434
-    ollama_base_url: str = "http://ollama:11434"
-    ollama_embed_model: str = "nomic-embed-text"
-    # CRITICAL: embed_dim must match the pgvector column dimension defined in
-    # the Alembic migration (db/models/embedding.py). Changing the model
-    # requires a new migration to ALTER the vector column size.
+    # ── Embeddings (Gemini) ───────────────────────────────────────────────────
+    # text-embedding-004 supports output_dimensionality 1–768; we use 768 to
+    # match the pgvector column created in the first Alembic migration.
+    # Changing embed_dim requires a new migration to ALTER the vector column.
+    gemini_embed_model: str = "models/text-embedding-004"
     embed_dim: int = 768
 
     # ── RAG ──────────────────────────────────────────────────────────────────
@@ -195,7 +191,7 @@ def get_settings() -> Settings:
             "log_level": settings.log_level,
             "postgres_host": settings.postgres_host,
             "postgres_db": settings.postgres_db,
-            "ollama_base_url": settings.ollama_base_url,
+            "gemini_embed_model": settings.gemini_embed_model,
             "embed_dim": settings.embed_dim,
             "tracing_enabled": settings.langchain_tracing_v2,
         },

@@ -194,9 +194,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # a 400 MB model loaded on every request would be ~400 ms × every request.
     app.state.classifier = None
 
-    # Stage 4: httpx.AsyncClient pointed at the Ollama embedding server.
-    # Stored here so all embedding requests share ONE connection pool.
-    app.state.embedder = None
+    # Stage 4: GeminiEmbedder singleton — avoids re-configuring the Gemini
+    # SDK and re-creating the lru_cache entry on every embedding request.
+    from app.rag.embedder import get_embedder
+
+    app.state.embedder = get_embedder(
+        api_key=settings.google_api_key.get_secret_value(),
+        model=settings.gemini_embed_model,
+        embed_dim=settings.embed_dim,
+    )
 
     # Stage 5: two Gemini SDK clients — cheap (Flash) and strong (Pro).
     # Cached here so SDK auth and HTTP session creation happen once, not per tool call.
@@ -217,9 +223,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # then closes all connections. Without this, the DB sees stale connections.
     await engine.dispose()
 
-    # Close the Ollama httpx client (Stage 4 populates this).
-    if app.state.embedder is not None:
-        await app.state.embedder.aclose()
+    # GeminiEmbedder has no async resources to close — the SDK manages its
+    # own HTTP session. No cleanup needed here for app.state.embedder.
 
     logger.info("shutdown.complete")
 

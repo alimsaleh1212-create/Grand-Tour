@@ -2,20 +2,18 @@
 #
 # Services:
 #   db        — Postgres 16 + pgvector; init script enables the vector extension.
-#   ollama    — Local LLM server that hosts the nomic-embed-text embedding model.
-#   ollama-init — One-shot init container that pulls nomic-embed-text on first
-#                 run.  Skipped automatically on subsequent restarts because the
-#                 model file is persisted in the `ollama_models` named volume.
 #   backend   — FastAPI application (async, uvicorn).
 #   frontend  — React SPA served by nginx; proxies /api → backend.
 #   pgadmin   — Optional pgAdmin 4 UI for inspecting the database.
+#
+# Embeddings use the Gemini API (GOOGLE_API_KEY in .env) — no local Ollama
+# service required. This makes the stack Render-deployable without a GPU.
 #
 # All application secrets are read from a .env file (copy from .env.example).
 # Service-to-service communication uses Docker service names (no hardcoded IPs).
 #
 # Named volumes:
 #   postgres_data   — database files survive container restarts / recreates.
-#   ollama_models   — pulled model weights survive restarts (avoids re-download).
 #   pgadmin_data    — pgAdmin server definitions survive restarts.
 #
 # Usage:
@@ -49,39 +47,6 @@ services:
       timeout: 5s
       retries: 5
 
-  # ─── Ollama embedding server ───────────────────────────────────────────────
-  ollama:
-    image: ollama/ollama:latest
-    container_name: stp_ollama
-    restart: unless-stopped
-    networks:
-      - stp_network
-    volumes:
-      - ollama_models:/root/.ollama
-    healthcheck:
-      test: ["CMD-SHELL", "curl --silent --fail http://localhost:11434/api/tags || exit 1"]
-      interval: 15s
-      timeout: 5s
-      retries: 10
-
-  # ─── One-shot model pull (runs only once; model persisted in volume) ───────
-  ollama-init:
-    image: curlimages/curl:8.10.1
-    container_name: stp_ollama_init
-    restart: "no"
-    networks:
-      - stp_network
-    volumes:
-      - ./infra/ollama/pull-models.sh:/pull-models.sh:ro
-    entrypoint: ["/bin/sh", "/pull-models.sh"]
-    environment:
-      # OLLAMA_SERVICE_HOST is defined in .env (default: ollama:11434).
-      # The init script uses this to wait for the server before pulling the model.
-      OLLAMA_HOST: ${OLLAMA_SERVICE_HOST:-ollama:11434}
-    depends_on:
-      ollama:
-        condition: service_healthy
-
   # ─── FastAPI backend ───────────────────────────────────────────────────────
   backend:
     build:
@@ -89,9 +54,9 @@ services:
       dockerfile: Dockerfile
     container_name: stp_backend
     restart: unless-stopped
-    # All configuration — including POSTGRES_HOST, POSTGRES_PORT, OLLAMA_BASE_URL,
-    # GOOGLE_API_KEY, JWT_SECRET, etc. — is loaded exclusively from .env.
-    # No values are hardcoded here. Copy .env.example → .env and fill in secrets.
+    # All configuration — including POSTGRES_HOST, GOOGLE_API_KEY, JWT_SECRET,
+    # etc. — is loaded exclusively from .env. No values are hardcoded here.
+    # Copy .env.example → .env and fill in secrets.
     env_file: .env
     ports:
       - "8000:8000"
@@ -99,8 +64,6 @@ services:
       - stp_network
     depends_on:
       db:
-        condition: service_healthy
-      ollama:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "curl --silent --fail http://localhost:8000/health || exit 1"]
@@ -148,5 +111,4 @@ networks:
 
 volumes:
   postgres_data:
-  ollama_models:
   pgadmin_data:
