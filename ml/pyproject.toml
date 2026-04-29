@@ -1,0 +1,40 @@
+[project]
+name = "smart-travel-planner-ml"
+version = "0.1.0"
+description = "Training pipeline for the travel-style classifier"
+readme = "../README.md"
+requires-python = ">=3.12,<3.13"
+
+# The training environment is intentionally separate from the backend so
+# heavy training-only dependencies (jupyter, matplotlib, seaborn, xgboost)
+# never ship in the production runtime image.
+dependencies = [
+    "scikit-learn==1.6.0",
+    "pandas==2.2.3",
+    "numpy==2.2.0",
+    "joblib==1.4.2",
+    "matplotlib==3.9.3",
+    "seaborn==0.13.2",
+    "imbalanced-learn==0.12.4",
+]
+
+[dependency-groups]
+dev = [
+    "pytest==8.3.4",
+    "ipykernel==6.29.5",
+    "jupyter==1.1.1",
+    "black==24.10.0",
+    "isort==5.13.2",
+    "flake8==7.1.1",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

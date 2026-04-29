@@ -1,0 +1,138 @@
+# GitHub Actions CI pipeline — runs on every push and pull-request to main.
+#
+# Jobs:
+#   lint-and-type-check
+#     - black --check
+#     - isort --check
+#     - flake8
+#     - mypy --strict
+#   test-backend
+#     - Spins up postgres+pgvector (service container) and runs pytest with
+#       coverage.  Backend must achieve ≥ 90% coverage on routers and ≥ 95% on
+#       auth_service (per Stage 2 and Stage 6 validation gates).
+#   test-ml
+#     - Runs ml/tests/ in the separate ml uv environment.
+#   frontend-build
+#     - npm install && npm run typecheck && npm run build
+#
+# Secrets required (set in repository Settings → Secrets → Actions):
+#   GOOGLE_API_KEY        — used only if any test exercises a live Gemini call
+#   JWT_SECRET            — test DB needs this for auth token tests
+#   POSTGRES_PASSWORD     — test service container password
+#
+# All test jobs are skipped if only documentation files changed
+# (paths-ignore: ["**/*.md", "docs/**"]).
+
+name: CI
+
+on:
+  push:
+    branches: [main, "feature/**"]
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+  pull_request:
+    branches: [main]
+
+env:
+  PYTHON_VERSION: "3.12"
+  NODE_VERSION: "20"
+
+jobs:
+  lint-and-type-check:
+    name: Lint & type-check
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+        with:
+          version: "0.5.x"
+      - name: Install dependencies
+        run: uv sync --all-extras
+      - name: black
+        run: uv run black --check app tests
+      - name: isort
+        run: uv run isort --check-only app tests
+      - name: flake8
+        run: uv run flake8 app tests
+      - name: mypy
+        run: uv run mypy --strict app
+
+  test-backend:
+    name: Backend tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: travel
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          POSTGRES_DB: travel_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+    env:
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: travel
+      POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+      POSTGRES_DB: travel_test
+      JWT_SECRET: ${{ secrets.JWT_SECRET }}
+      GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+      OLLAMA_BASE_URL: "http://localhost:11434"
+      EMBED_DIM: 768
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+        with:
+          version: "0.5.x"
+      - name: Install dependencies
+        run: uv sync --all-extras
+      - name: Run pytest with coverage
+        run: uv run pytest tests/ --cov=app --cov-report=term-missing --cov-fail-under=85
+
+  test-ml:
+    name: ML tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ml
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+        with:
+          version: "0.5.x"
+      - name: Install ML dependencies
+        run: uv sync
+      - name: Run ML tests
+        run: uv run pytest tests/
+
+  frontend-build:
+    name: Frontend build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package.json
+      - name: Install dependencies
+        run: npm install
+      - name: Type-check
+        run: npm run typecheck
+      - name: Build
+        run: npm run build

@@ -1,0 +1,61 @@
+# Environment & secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+credentials.json
+service-account*.json
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+env/
+.uv/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Testing & coverage
+.coverage
+htmlcov/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Node / frontend
+node_modules/
+frontend/dist/
+frontend/.vite/
+*.log
+npm-debug.log*
+
+# ML artefacts (large, rebuildable)
+ml/models/*.joblib
+!ml/models/.gitkeep
+
+# Data — raw datasets are large and may be licensed; commit small samples only
+ml/data/raw/*
+!ml/data/raw/.gitkeep
+!ml/data/raw/*.py
+ml/data/processed/*
+!ml/data/processed/.gitkeep
+rag/data/raw/*
+!rag/data/raw/.gitkeep
+
+# Docker volumes (compose mounts these as named volumes anyway)
+postgres_data/
+ollama_data/
+pgadmin_data/

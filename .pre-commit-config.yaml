@@ -1,0 +1,46 @@
+# Pre-commit pipeline (CLAUDE.md §16)
+# Order: black -> isort -> flake8 -> mypy -> pytest -> gitleaks
+# Install once with:  uv run pre-commit install
+repos:
+  - repo: https://github.com/psf/black
+    rev: 24.10.0
+    hooks:
+      - id: black
+        language_version: python3.12
+        args: ["--line-length=88"]
+
+  - repo: https://github.com/pycqa/isort
+    rev: 5.13.2
+    hooks:
+      - id: isort
+        args: ["--profile=black", "--line-length=88"]
+
+  - repo: https://github.com/pycqa/flake8
+    rev: 7.1.1
+    hooks:
+      - id: flake8
+        args: ["--max-line-length=88", "--extend-ignore=E203,W503"]
+
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.13.0
+    hooks:
+      - id: mypy
+        args: ["--strict", "--ignore-missing-imports"]
+        additional_dependencies:
+          - pydantic>=2.0
+          - pydantic-settings
+          - sqlalchemy>=2.0
+
+  - repo: local
+    hooks:
+      - id: pytest
+        name: pytest
+        entry: bash -c 'cd backend && uv run pytest -q || exit 1'
+        language: system
+        pass_filenames: false
+        stages: [pre-push]
+
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.21.2
+    hooks:
+      - id: gitleaks
