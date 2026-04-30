@@ -295,21 +295,46 @@ This is the dedicated ML stage and gets the most rigour.
 
 ---
 
-### Stage 6 — Chat API + History
+### Stage 6 — Chat API + History (Streaming SSE)
 
 **Scope:**
-- `routers/chat.py`: `POST /chat` (auth-protected, body = `ChatRequest{question, webhook_url?}`) — kicks off agent run, persists `AgentRun` + `ToolCall` rows, returns `ChatResponse{run_id, answer, tools_fired}`
-- `routers/runs.py`: `GET /runs` (list user's runs), `GET /runs/{id}` (full trace incl. tool calls)
-- Authorization: `current_user` Depends; routes filter by `user_id`. User A cannot read User B's runs.
-- Webhook fired in background after response is built — failure does NOT break response.
+- `routers/chat.py`: `POST /chat/stream` (auth-protected, SSE) — streams
+  agent node results as they complete via `agent.astream(stream_mode="updates")`;
+  also `POST /chat` (non-streaming, returns full ChatResponse after agent finishes).
+  **The user sees each tool result immediately — they never wait for all tools
+  to finish before seeing anything.** RAG results appear first, then
+  classifications, then live conditions, then the final travel plan answer.
+- SSE event types: `start`, `retrieve_result`, `classify_result`,
+  `live_result`, `answer_chunk` (streamed tokens), `done` (run_id, cost_usd).
+- `routers/runs.py`: `GET /runs` (list user's runs, newest first),
+  `GET /runs/{id}` (full trace with embedded tool calls)
+- `services/run_service.py`: `create_run`, `append_tool_call`, `finalise_run`,
+  `list_runs_for_user`, `get_run_for_user` — all async SQLAlchemy
+- Authorization: every query filters on `user_id == current_user.id`.
+  User A cannot read User B's runs.
+- Webhook fired via `BackgroundTasks` after response/stream completes.
 
 **Validation:**
-- pytest: cross-user isolation (A's token cannot read B's runs → 404), persistence verified, webhook fire-and-forget proven
+- pytest: cross-user isolation (A's token → 404 on B's run), persistence, SSE
+  integration test parses event stream
 - Coverage on routers ≥ 90%
 
 ---
 
-### Stage 7 — React Frontend
+### Stage 7 — React Frontend ("Grand Tour" editorial aesthetic)
+
+**Aesthetic direction:** Warm editorial travel magazine — light mode only.
+- Colors: cream (#FAF8F3), deep teal (#1A6B7A), terracotta (#E07A5F), gold (#C9A84C)
+- Fonts: Cormorant Garamond (headings/display) + Nunito (body)
+- Layout: 280px chat-history sidebar (left) + streaming results pane (right)
+- **Progressive disclosure**: each tool result appears as a styled card the
+  moment it arrives — RAG chunks, classification badge, live weather/FX/flights,
+  then the full formatted travel plan
+- **Streaming final answer** rendered incrementally as tokens arrive
+- Travel plan display: destination hero cards, style badges, cost estimate,
+  weather widget, FX rate chip, flight price (or unavailable note), sources
+- Previous chat history sidebar with one-click reload
+- Flight booking confirmation modal (Bonus Stage)
 
 **Scope:**
 - Vite + React + TypeScript, axios client w/ JWT interceptor
@@ -370,6 +395,39 @@ This is the dedicated ML stage and gets the most rigour.
 - Hand README to a fresh reader → they can clone & run with no questions
 - CI green on first push
 - README pre-review checklist (CLAUDE §24) all items ticked
+
+---
+
+### Stage B1 — Chat Memory + Flight Booking (Bonus)
+
+**Scope:**
+
+#### Memory
+- Previous chats already persisted as `AgentRun` rows in Postgres.
+- Frontend sidebar shows list of user's previous runs (question preview +
+  timestamp). Clicking a run loads the full final answer + tool results
+  without re-running the agent.
+- `GET /runs` returns enough to render the history list.
+- `GET /runs/{id}` returns full detail (tool_calls embedded).
+
+#### Flight Booking Tool
+- New tool `book_flight` (`agent/tools/book_flight.py`):
+  - Input: `BookFlightInput` — destination, flight_option (from live_conditions
+    result), passenger_name, passenger_email
+  - Human-in-the-loop: agent emits a special SSE event
+    `{"type": "booking_request", "flight": {...}}` instead of immediately
+    booking. Frontend shows a modal confirmation form.
+  - On user confirmation: `POST /bookings` (auth-protected) saves a `Booking`
+    row to Postgres (no real airline API — demo only). Returns booking reference.
+  - `Booking` DB model: id, user_id, run_id, origin_iata, destination_iata,
+    departure_date, passenger_name, passenger_email, price_total, currency,
+    status ("confirmed"), booking_ref (UUID), created_at.
+  - Frontend shows confirmed booking card with reference number.
+
+**Validation:**
+- Previous chats load correctly, oldest first in sidebar.
+- Booking modal appears when agent finds a flight, confirmation saves to DB,
+  booking reference displayed.
 
 ---
 

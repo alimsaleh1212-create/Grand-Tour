@@ -1,23 +1,367 @@
-"""Chat router — the user-facing agent entry point.
+"""Chat router — streaming SSE and non-streaming agent entry points.
 
-Implemented in Stage 6.
+ENDPOINTS
+---------
+    POST /chat/stream   — SSE stream; each agent node emits an event as soon
+                          as it completes so the user sees partial results
+                          immediately (RAG → classify → live → answer).
+    POST /chat          — Non-streaming; waits for full agent result then
+                          returns ChatResponse.
 
-Endpoints (planned):
-    POST /chat
-        auth: required (Depends(current_user))
-        body: ChatRequest
-        response: ChatResponse, status 200
-        side effects:
-            * Creates an AgentRun row scoped to current_user.
-            * Invokes the LangGraph agent (3 tools, two-model pipeline).
-            * Persists one ToolCall row per tool invocation.
-            * Schedules a background webhook delivery if webhook_url is
-              provided OR the user has a default channel configured.
-        errors:
-            401 — missing/invalid token
-            400 — empty question, malformed webhook URL
-            500 — irrecoverable agent failure (logged, generic detail)
-
-The webhook never breaks the user-facing response — delivery happens via
-FastAPI BackgroundTasks and its failure is logged + persisted on the run.
+SSE EVENT TYPES (stream endpoint)
+----------------------------------
+    {"type":"start",             "question":"..."}
+    {"type":"retrieve_result",   "chunks":[...]}
+    {"type":"classify_result",   "classifications":[...]}
+    {"type":"live_result",       "live_data":[...]}
+    {"type":"answer",            "text":"..."}
+    {"type":"booking_request",   "flight":{...}}   (Bonus B1)
+    {"type":"done",              "run_id":N, "cost_usd":..., "errors":[...]}
+    {"type":"error",             "detail":"..."}   (irrecoverable failure)
 """
+
+from __future__ import annotations
+
+import json
+import logging
+from typing import Annotated, Any, AsyncGenerator
+
+from fastapi import APIRouter, BackgroundTasks, Depends, Request, status
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.exceptions import AppError
+from app.db.models.agent_run import AgentRun
+from app.deps.auth import CurrentUser
+from app.deps.db import get_session
+from app.schemas.chat import ChatRequest, ChatResponse, ToolFireSummary
+from app.services import run_service
+from app.webhook.publisher import maybe_publish
+
+log = logging.getLogger(__name__)
+
+router = APIRouter(prefix="/chat", tags=["chat"])
+
+
+# ── helpers ───────────────────────────────────────────────────────────────────
+
+
+def _sse(event_dict: dict[str, Any]) -> str:
+    """Format one SSE frame."""
+    return f"data: {json.dumps(event_dict, default=str)}\n\n"
+
+
+def _serialise_hits(hits: list[Any]) -> list[dict[str, Any]]:
+    if not hits:
+        return []
+    result = []
+    for h in hits:
+        if hasattr(h, "model_dump"):
+            result.append(h.model_dump())
+        elif hasattr(h, "__dataclass_fields__"):
+            import dataclasses
+            result.append(dataclasses.asdict(h))
+        else:
+            result.append(dict(h))
+    return result
+
+
+def _serialise_list(items: list[Any]) -> list[dict[str, Any]]:
+    if not items:
+        return []
+    result = []
+    for item in items:
+        if item is None:
+            result.append(None)  # type: ignore[arg-type]
+        elif hasattr(item, "model_dump"):
+            result.append(item.model_dump())
+        else:
+            result.append(str(item))
+    return result
+
+
+# ── streaming endpoint ────────────────────────────────────────────────────────
+
+
+@router.post("/stream")
+async def chat_stream(
+    body: ChatRequest,
+    request: Request,
+    user: CurrentUser,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    background: BackgroundTasks,
+) -> StreamingResponse:
+    """Stream agent node results as Server-Sent Events.
+
+    The client should use fetch() + ReadableStream (not EventSource, since
+    EventSource only supports GET).  Each completed graph node emits one SSE
+    frame immediately — the user sees RAG results before the classify node
+    even starts.
+    """
+    agent = request.app.state.agent
+
+    async def _generate() -> AsyncGenerator[str, None]:
+        # Create the DB run row
+        run: AgentRun = await create_and_commit_run(session, user.id, body.question)
+        run_id = run.id
+
+        tokens_cheap = 0
+        tokens_strong = 0
+        tool_summaries: list[ToolFireSummary] = []
+        final_answer = ""
+        errors: list[str] = []
+
+        try:
+            yield _sse({"type": "start", "question": body.question})
+
+            async for update in agent.astream(
+                {"question": body.question},
+                stream_mode="updates",
+            ):
+                for node_name, node_output in update.items():
+                    if node_name == "retrieve":
+                        hits = node_output.get("retrieved_hits") or []
+                        yield _sse({
+                            "type": "retrieve_result",
+                            "chunks": _serialise_hits(hits),
+                        })
+                        await append_retrieve_call(
+                            session, run_id, hits, tool_summaries
+                        )
+
+                    elif node_name == "classify":
+                        classifications = node_output.get("classifications") or []
+                        yield _sse({
+                            "type": "classify_result",
+                            "classifications": _serialise_list(classifications),
+                        })
+                        await append_classify_call(
+                            session, run_id, classifications, tool_summaries
+                        )
+
+                    elif node_name == "live":
+                        live_data = node_output.get("live_data") or []
+                        yield _sse({
+                            "type": "live_result",
+                            "live_data": _serialise_list(live_data),
+                        })
+                        await append_live_call(
+                            session, run_id, live_data, tool_summaries
+                        )
+
+                    elif node_name == "synthesize":
+                        text = node_output.get("final_answer") or ""
+                        final_answer = text
+                        tokens_cheap += node_output.get("tokens_in", 0) or 0
+                        tokens_strong += node_output.get("tokens_out", 0) or 0
+                        yield _sse({"type": "answer", "text": text})
+
+                    elif node_name in ("sanitize", "extract"):
+                        # accumulate token counts from intermediate nodes
+                        tokens_cheap += node_output.get("tokens_in", 0) or 0
+
+                    # collect errors from any node
+                    node_errors = node_output.get("errors") or []
+                    errors.extend(node_errors)
+
+            # Finalise in DB
+            run = await run_service.finalise_run(
+                session,
+                run_id=run_id,
+                final_answer=final_answer,
+                total_tokens_cheap=tokens_cheap,
+                total_tokens_strong=tokens_strong,
+                webhook_status="pending" if body.webhook_url else None,
+            )
+            await session.commit()
+
+            yield _sse({
+                "type": "done",
+                "run_id": run_id,
+                "cost_usd": float(run.cost_usd),
+                "errors": errors,
+            })
+
+            # Fire webhook in background (failure never breaks the stream)
+            if body.webhook_url:
+                background.add_task(
+                    maybe_publish,
+                    url=body.webhook_url,
+                    run_id=run_id,
+                    question=body.question,
+                    answer=final_answer,
+                    session_factory=request.app.state.SessionLocal,
+                )
+
+        except Exception as exc:
+            log.error("chat.stream.error", exc_info=True)
+            yield _sse({"type": "error", "detail": "Agent processing failed."})
+            try:
+                await session.rollback()
+            except Exception:
+                pass
+
+    return StreamingResponse(
+        _generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+# ── non-streaming endpoint ────────────────────────────────────────────────────
+
+
+@router.post("", response_model=ChatResponse, status_code=status.HTTP_200_OK)
+async def chat(
+    body: ChatRequest,
+    request: Request,
+    user: CurrentUser,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    background: BackgroundTasks,
+) -> ChatResponse:
+    """Run the full agent and return a single ChatResponse when done.
+
+    Useful for programmatic API clients that don't need streaming.
+    """
+    agent = request.app.state.agent
+
+    run: AgentRun = await create_and_commit_run(session, user.id, body.question)
+    run_id = run.id
+
+    tool_summaries: list[ToolFireSummary] = []
+    tokens_cheap = 0
+    tokens_strong = 0
+
+    final_state = await agent.ainvoke({"question": body.question})
+
+    # Record tool calls from final state
+    for classification in final_state.get("classifications") or []:
+        tool_summaries.append(ToolFireSummary(
+            tool_name="classify_style", ok=True, latency_ms=0
+        ))
+    if final_state.get("retrieved_hits"):
+        tool_summaries.insert(0, ToolFireSummary(
+            tool_name="retrieve_destinations", ok=True, latency_ms=0
+        ))
+    if final_state.get("live_data"):
+        tool_summaries.append(ToolFireSummary(
+            tool_name="live_conditions", ok=True, latency_ms=0
+        ))
+
+    tokens_cheap = final_state.get("tokens_in", 0) or 0
+    tokens_strong = final_state.get("tokens_out", 0) or 0
+    final_answer = final_state.get("final_answer", "") or ""
+
+    run = await run_service.finalise_run(
+        session,
+        run_id=run_id,
+        final_answer=final_answer,
+        total_tokens_cheap=tokens_cheap,
+        total_tokens_strong=tokens_strong,
+        webhook_status="pending" if body.webhook_url else None,
+    )
+    await session.commit()
+
+    if body.webhook_url:
+        background.add_task(
+            maybe_publish,
+            url=body.webhook_url,
+            run_id=run_id,
+            question=body.question,
+            answer=final_answer,
+            session_factory=request.app.state.SessionLocal,
+        )
+
+    return ChatResponse(
+        run_id=run_id,
+        answer=final_answer,
+        tools_fired=tool_summaries,
+        cost_usd=float(run.cost_usd),
+        tokens_cheap=tokens_cheap,
+        tokens_strong=tokens_strong,
+    )
+
+
+# ── helpers ────────────────────────────────────────────────────────────────────
+
+
+async def create_and_commit_run(
+    session: AsyncSession, user_id: int, question: str
+) -> AgentRun:
+    run = await run_service.create_run(session, user_id=user_id, question=question)
+    await session.commit()
+    await session.refresh(run)
+    return run
+
+
+async def append_retrieve_call(
+    session: AsyncSession,
+    run_id: int,
+    hits: list[Any],
+    summaries: list[ToolFireSummary],
+) -> None:
+    serialised = _serialise_hits(hits)
+    await run_service.append_tool_call(
+        session,
+        run_id=run_id,
+        tool_name="retrieve_destinations",
+        args={"top_k": len(hits)},
+        result={"chunks": serialised},
+        tokens=0,
+        latency_ms=0,
+        error=None,
+    )
+    await session.commit()
+    summaries.append(ToolFireSummary(
+        tool_name="retrieve_destinations", ok=True, latency_ms=0
+    ))
+
+
+async def append_classify_call(
+    session: AsyncSession,
+    run_id: int,
+    classifications: list[Any],
+    summaries: list[ToolFireSummary],
+) -> None:
+    serialised = _serialise_list(classifications)
+    await run_service.append_tool_call(
+        session,
+        run_id=run_id,
+        tool_name="classify_style",
+        args={},
+        result={"classifications": serialised},
+        tokens=0,
+        latency_ms=0,
+        error=None,
+    )
+    await session.commit()
+    summaries.append(ToolFireSummary(
+        tool_name="classify_style", ok=True, latency_ms=0
+    ))
+
+
+async def append_live_call(
+    session: AsyncSession,
+    run_id: int,
+    live_data: list[Any],
+    summaries: list[ToolFireSummary],
+) -> None:
+    serialised = _serialise_list(live_data)
+    await run_service.append_tool_call(
+        session,
+        run_id=run_id,
+        tool_name="live_conditions",
+        args={},
+        result={"live_data": serialised},
+        tokens=0,
+        latency_ms=0,
+        error=None,
+    )
+    await session.commit()
+    summaries.append(ToolFireSummary(
+        tool_name="live_conditions", ok=True, latency_ms=0
+    ))

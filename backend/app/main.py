@@ -133,7 +133,7 @@ from app.core.exceptions import (
 from app.core.logging import setup_logging
 from app.core.settings import get_settings
 from app.db.session import create_engine, make_sessionmaker
-from app.routers import auth, health
+from app.routers import auth, bookings, chat, health, runs
 
 # Module-level logger — used only for lifespan events. Route-level loggers
 # are declared in their own modules with logging.getLogger(__name__).
@@ -363,9 +363,10 @@ def build_app() -> FastAPI:
     # Each router lives in its own file, grouped by resource (not by HTTP method).
     # main.py NEVER defines endpoints directly — see CLAUDE.md §22.
     application.include_router(health.router)
-    application.include_router(auth.router)  # prefix="/auth" set inside the router
-    # Stage 6: application.include_router(chat_router,  prefix="/chat",  tags=["chat"])
-    # Stage 6: application.include_router(runs_router,  prefix="/runs",  tags=["runs"])
+    application.include_router(auth.router)
+    application.include_router(chat.router)
+    application.include_router(runs.router)
+    application.include_router(bookings.router)
 
     return application
 
