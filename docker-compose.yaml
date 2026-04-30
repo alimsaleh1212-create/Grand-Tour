@@ -99,10 +99,51 @@ services:
       dockerfile: Dockerfile
     container_name: stp_backend
     restart: unless-stopped
-    # All configuration — including POSTGRES_HOST, GOOGLE_API_KEY, JWT_SECRET,
-    # etc. — is loaded exclusively from .env. No values are hardcoded here.
-    # Copy .env.example → .env and fill in secrets.
-    env_file: .env
+    # Secrets (POSTGRES_PASSWORD, JWT_SECRET, GOOGLE_API_KEY, …) are NOT passed
+    # here — the backend fetches them from Vault at startup via VAULT_ADDR/TOKEN.
+    # Only non-secret config is listed explicitly; Docker Compose substitutes
+    # ${VAR} values from the host's .env at compose-up time.
+    environment:
+      # ── App ──────────────────────────────────────────────────────────────
+      APP_ENV: ${APP_ENV:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173}
+      # ── Postgres (non-secret connection params) ──────────────────────────
+      POSTGRES_USER: ${POSTGRES_USER:-travel}
+      POSTGRES_DB: ${POSTGRES_DB:-travel}
+      POSTGRES_HOST: db
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      # ── Auth (algorithms and TTLs, not keys) ─────────────────────────────
+      JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
+      JWT_ACCESS_TTL_MINUTES: ${JWT_ACCESS_TTL_MINUTES:-60}
+      BCRYPT_ROUNDS: ${BCRYPT_ROUNDS:-12}
+      # ── LLM (model names and limits, not API keys) ────────────────────────
+      GEMINI_CHEAP_MODEL: ${GEMINI_CHEAP_MODEL:-gemini-2.5-flash}
+      GEMINI_STRONG_MODEL: ${GEMINI_STRONG_MODEL:-gemini-2.5-pro}
+      GEMINI_MAX_OUTPUT_TOKENS: ${GEMINI_MAX_OUTPUT_TOKENS:-2048}
+      LLM_MAX_RETRIES: ${LLM_MAX_RETRIES:-3}
+      LLM_RETRY_DELAY: ${LLM_RETRY_DELAY:-1.0}
+      # ── Embeddings ────────────────────────────────────────────────────────
+      GEMINI_EMBED_MODEL: ${GEMINI_EMBED_MODEL:-models/gemini-embedding-001}
+      EMBED_DIM: ${EMBED_DIM:-768}
+      # ── ML model ─────────────────────────────────────────────────────────
+      ML_MODEL_PATH: ${ML_MODEL_PATH:-../ml/models/travel_style_classifier_v1.joblib}
+      # ── RAG ──────────────────────────────────────────────────────────────
+      DEFAULT_CHUNK_SIZE: ${DEFAULT_CHUNK_SIZE:-500}
+      DEFAULT_CHUNK_OVERLAP: ${DEFAULT_CHUNK_OVERLAP:-50}
+      RETRIEVAL_TOP_K: ${RETRIEVAL_TOP_K:-5}
+      # ── Tracing (on/off flags and project names, not API keys) ───────────
+      LANGSMITH_TRACING: ${LANGSMITH_TRACING:-false}
+      LANGCHAIN_TRACING_V2: ${LANGCHAIN_TRACING_V2:-false}
+      LANGSMITH_PROJECT: ${LANGSMITH_PROJECT:-smart-travel-planner}
+      LANGCHAIN_PROJECT: ${LANGCHAIN_PROJECT:-smart-travel-planner}
+      LANGSMITH_ENDPOINT: ${LANGSMITH_ENDPOINT:-https://api.smith.langchain.com}
+      # ── Webhook delivery policy (not URLs — those are secrets in Vault) ──
+      WEBHOOK_TIMEOUT_SECONDS: ${WEBHOOK_TIMEOUT_SECONDS:-5.0}
+      WEBHOOK_MAX_RETRIES: ${WEBHOOK_MAX_RETRIES:-1}
+      # ── Vault connection (non-secret: dev coordinates, not a real secret) ─
+      VAULT_ADDR: http://vault:8200
+      VAULT_TOKEN: dev-root-token
     ports:
       - "8000:8000"
     networks:
