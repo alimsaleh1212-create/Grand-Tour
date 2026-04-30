@@ -144,11 +144,17 @@ class Settings(BaseSettings):
     amadeus_api_secret: SecretStr | None = None
 
     # ── Tracing (LangSmith) ───────────────────────────────────────────────────
-    # Set LANGCHAIN_TRACING_V2=true and LANGCHAIN_API_KEY=<key> to enable.
-    # When false (the default), no traces are sent — safe for offline demos.
+    # Supports both old (LANGCHAIN_*) and new (LANGSMITH_*) env var names.
+    # main.py lifespan bridges these into os.environ so the langchain SDK
+    # can read them (SDK reads os.environ directly, not pydantic-settings).
     langchain_tracing_v2: bool = False
     langchain_api_key: SecretStr | None = None
     langchain_project: str = "smart-travel-planner"
+    # New-style LANGSMITH_* vars (preferred; take precedence in lifespan bridge)
+    langsmith_tracing: bool = False
+    langsmith_api_key: SecretStr | None = None
+    langsmith_project: str = "smart-travel-planner"
+    langsmith_endpoint: str = "https://api.smith.langchain.com"
 
     # ── Webhook (Discord / Slack) ─────────────────────────────────────────────
     # Both are optional. The publisher fires whichever URL is set, or skips the

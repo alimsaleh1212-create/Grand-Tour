@@ -71,7 +71,7 @@ export default function ChatPanel() {
     scrollToBottom();
   }
 
-  const handleSend = useCallback(async (question: string, webhookUrl?: string) => {
+  const handleSend = useCallback(async (question: string) => {
     if (streaming) return;
 
     // Abort any previous stream
@@ -95,7 +95,7 @@ export default function ChatPanel() {
     scrollToBottom();
 
     try {
-      const gen = streamChat({ question, webhook_url: webhookUrl }, controller.signal);
+      const gen = streamChat({ question }, controller.signal);
       for await (const event of gen) {
         if (event.type === "retrieve_result") {
           updateAgent(agentId, {

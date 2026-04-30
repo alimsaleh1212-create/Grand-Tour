@@ -114,6 +114,7 @@ COMPLETE REQUEST FLOW (every HTTP request follows this path)
 from __future__ import annotations
 
 import logging
+import os
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
@@ -167,6 +168,26 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # If a required env var was missing, get_settings() raised ValidationError
     # before we reached this line. The process would have exited cleanly.
     # By the time we are here, all settings are typed and safe to use.
+
+    # Bridge LangSmith config into os.environ so the langchain SDK can read it.
+    # pydantic-settings reads .env into Python objects but never writes os.environ;
+    # langchain/langgraph reads os.environ directly — so we must propagate here.
+    tracing_on = settings.langsmith_tracing or settings.langchain_tracing_v2
+    api_key = (
+        settings.langsmith_api_key or settings.langchain_api_key
+    )
+    if tracing_on and api_key:
+        os.environ["LANGSMITH_TRACING"] = "true"
+        os.environ["LANGCHAIN_TRACING_V2"] = "true"
+        os.environ["LANGSMITH_API_KEY"] = api_key.get_secret_value()
+        os.environ["LANGCHAIN_API_KEY"] = api_key.get_secret_value()
+        project = settings.langsmith_project or settings.langchain_project
+        os.environ["LANGSMITH_PROJECT"] = project
+        os.environ["LANGCHAIN_PROJECT"] = project
+        os.environ["LANGSMITH_ENDPOINT"] = settings.langsmith_endpoint
+        logger.info("startup.langsmith_enabled", extra={"project": project})
+    else:
+        logger.info("startup.langsmith_disabled")
 
     # ── Step 3: Async DB engine (connection pool) ─────────────────────────────
     # create_engine() (from db/session.py) wraps create_async_engine with the

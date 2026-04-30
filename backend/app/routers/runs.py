@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import NotFoundError
@@ -20,7 +20,8 @@ from app.deps.auth import CurrentUser
 from app.deps.db import get_session
 from app.schemas.chat import NotifyResponse, RunDetailOut, RunOut
 from app.services import run_service
-from app.webhook.publisher import maybe_publish
+from app.webhook.adapters import build_payload
+from app.webhook.publisher import publish
 
 log = logging.getLogger(__name__)
 
@@ -59,7 +60,6 @@ async def get_run(
 @router.post("/{run_id}/notify", response_model=NotifyResponse, status_code=status.HTTP_200_OK)
 async def notify_run(
     run_id: int,
-    request: Request,
     user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> NotifyResponse:
@@ -84,17 +84,25 @@ async def notify_run(
     question = run.question or ""
     answer = run.final_answer or ""
 
-    await maybe_publish(
-        url=discord_url,
-        run_id=run_id,
-        question=question,
-        answer=answer,
-        session_factory=request.app.state.SessionLocal,
+    payload = build_payload(discord_url, question, answer, run_id)
+    delivered = await publish(
+        discord_url,
+        payload,
+        timeout_seconds=settings.webhook_timeout_seconds,
+        max_retries=settings.webhook_max_retries,
     )
 
-    # maybe_publish updates webhook_status on the run; read result from DB
-    updated = await run_service.get_run_for_user(session, user_id=user.id, run_id=run_id)
-    delivered = updated is not None and updated.webhook_status == "delivered"
+    # Update webhook_status on the run using the current session
+    webhook_status = "delivered" if delivered else "failed"
+    await run_service.finalise_run(
+        session,
+        run_id=run_id,
+        final_answer=answer,
+        total_tokens_cheap=0,
+        total_tokens_strong=0,
+        webhook_status=webhook_status,
+    )
+    await session.commit()
 
     log.info(
         "runs.notify",

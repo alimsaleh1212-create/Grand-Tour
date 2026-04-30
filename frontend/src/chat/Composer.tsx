@@ -2,16 +2,12 @@ import { useState, useRef, useEffect, type KeyboardEvent } from "react";
 import Spinner from "@/components/Spinner";
 
 interface Props {
-  onSend: (question: string, webhookUrl?: string) => void;
+  onSend: (question: string) => void;
   disabled: boolean;
 }
 
 export default function Composer({ onSend, disabled }: Props) {
   const [text, setText] = useState("");
-  const [webhookUrl, setWebhookUrl] = useState(
-    () => sessionStorage.getItem("stp_webhook_url") ?? ""
-  );
-  const [showWebhook, setShowWebhook] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Auto-resize textarea up to 5 lines
@@ -33,39 +29,12 @@ export default function Composer({ onSend, disabled }: Props) {
   function submit() {
     const q = text.trim();
     if (!q || disabled) return;
-    onSend(q, webhookUrl || undefined);
+    onSend(q);
     setText("");
-  }
-
-  function handleWebhookChange(v: string) {
-    setWebhookUrl(v);
-    sessionStorage.setItem("stp_webhook_url", v);
   }
 
   return (
     <div style={wrapper}>
-      {/* Webhook disclosure */}
-      <div style={{ marginBottom: showWebhook ? 8 : 0 }}>
-        <button
-          type="button"
-          onClick={() => setShowWebhook((p) => !p)}
-          style={webhookToggle}
-        >
-          <span style={{ transform: showWebhook ? "rotate(90deg)" : "none", display: "inline-block", transition: "transform 0.2s" }}>▸</span>
-          Webhook URL (optional)
-        </button>
-        {showWebhook && (
-          <input
-            type="url"
-            className="input"
-            placeholder="https://discord.com/api/webhooks/…"
-            value={webhookUrl}
-            onChange={(e) => handleWebhookChange(e.target.value)}
-            style={{ marginTop: 6, fontSize: 13 }}
-          />
-        )}
-      </div>
-
       {/* Input row */}
       <div style={inputRow}>
         <textarea
@@ -112,21 +81,6 @@ const wrapper: React.CSSProperties = {
   borderTop: "1px solid var(--border)",
   background: "var(--white)",
   flexShrink: 0,
-};
-
-const webhookToggle: React.CSSProperties = {
-  background: "none",
-  border: "none",
-  cursor: "pointer",
-  fontSize: 12,
-  color: "var(--ink-muted)",
-  fontFamily: "var(--font-body)",
-  fontWeight: 600,
-  letterSpacing: "0.04em",
-  display: "flex",
-  alignItems: "center",
-  gap: 5,
-  padding: "2px 0",
 };
 
 const inputRow: React.CSSProperties = {
