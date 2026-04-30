@@ -13,7 +13,10 @@ WORKDIR /app
 RUN pip install --no-cache-dir uv==0.5.11
 
 COPY pyproject.toml uv.lock ./
-RUN uv sync --no-dev --frozen
+# --no-install-project: install deps only, skip building the local package.
+# The app/ source is copied directly in the runtime stage and found via WORKDIR.
+# This avoids hatchling trying to resolve readme = "../README.md" (outside context).
+RUN uv sync --no-dev --frozen --no-install-project
 
 
 FROM python:3.12-slim AS runtime

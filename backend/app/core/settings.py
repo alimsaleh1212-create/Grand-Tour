@@ -53,12 +53,12 @@ class Settings(BaseSettings):
     """
 
     model_config = SettingsConfigDict(
-        # Reads from .env in the current working directory.
-        # In Docker, .env is mounted via docker-compose env_file.
+        # Reads from .env when running locally (development without Docker).
+        # In Docker, secrets come from Vault (injected into os.environ before
+        # Settings() is constructed); non-secrets arrive via docker-compose
+        # environment block. pydantic-settings: os.environ > .env file.
         env_file=".env",
         env_file_encoding="utf-8",
-        # The .env file is shared with docker-compose services (pgadmin, n8n, etc.)
-        # so we ignore unknown keys. Required fields still fail loudly if absent.
         extra="ignore",
     )
 
