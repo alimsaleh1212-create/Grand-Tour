@@ -88,6 +88,25 @@ services:
       backend:
         condition: service_healthy
 
+  # ─── n8n workflow automation (webhook receiver) ───────────────────────────
+  # Access at http://localhost:5678
+  # Paste http://n8n:5678/webhook/<path> as the Webhook URL in the frontend.
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: stp_n8n
+    restart: unless-stopped
+    ports:
+      - "5678:5678"
+    networks:
+      - stp_network
+    volumes:
+      - n8n_data:/home/node/.n8n
+    environment:
+      - N8N_HOST=localhost
+      - N8N_PORT=5678
+      # Public URL used when n8n generates webhook display links
+      - WEBHOOK_URL=http://localhost:5678
+
   # ─── pgAdmin 4 (optional, development convenience) ────────────────────────
   pgadmin:
     image: dpage/pgadmin4:8.13
@@ -112,3 +131,4 @@ networks:
 volumes:
   postgres_data:
   pgadmin_data:
+  n8n_data:

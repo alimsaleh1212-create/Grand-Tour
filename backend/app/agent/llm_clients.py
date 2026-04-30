@@ -111,6 +111,7 @@ class GeminiClient:
         system_prompt: str,
         user_prompt: str,
         response_schema: type[BaseModel] | None = None,
+        json_mode: bool = False,
         temperature: float = 0.0,
     ) -> GenerationResult:
         """Generate a completion from the model.
@@ -135,6 +136,8 @@ class GeminiClient:
         if response_schema is not None:
             config_kwargs["response_mime_type"] = "application/json"
             config_kwargs["response_schema"] = response_schema
+        elif json_mode:
+            config_kwargs["response_mime_type"] = "application/json"
 
         config = gtypes.GenerateContentConfig(**config_kwargs)
 

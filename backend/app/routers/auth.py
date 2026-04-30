@@ -39,6 +39,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.deps.auth import CurrentUser
 from app.deps.db import get_session
 from app.schemas.auth import AccessTokenResponse, LoginRequest, SignupRequest, UserOut
 from app.services import auth_service
@@ -98,3 +99,14 @@ async def login(
         email=body.email,
         password=body.password,
     )
+
+
+@router.get(
+    "/me",
+    response_model=UserOut,
+    status_code=status.HTTP_200_OK,
+    summary="Return the current authenticated user",
+)
+async def me(user: CurrentUser) -> UserOut:
+    """Return the authenticated user's public profile."""
+    return UserOut.model_validate(user)

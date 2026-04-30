@@ -57,9 +57,9 @@ class Settings(BaseSettings):
         # In Docker, .env is mounted via docker-compose env_file.
         env_file=".env",
         env_file_encoding="utf-8",
-        # CRITICAL: a typo like GOOGEL_API_KEY raises ValidationError at startup
-        # instead of silently leaving google_api_key as None for two weeks.
-        extra="forbid",
+        # The .env file is shared with docker-compose services (pgadmin, n8n, etc.)
+        # so we ignore unknown keys. Required fields still fail loudly if absent.
+        extra="ignore",
     )
 
     # ── App ──────────────────────────────────────────────────────────────────

@@ -136,13 +136,19 @@ def build_agent(deps: AgentDeps) -> Any:
         generation = await deps.cheap_llm.generate(
             system_prompt=SYSTEM_FEATURE_EXTRACTOR,
             user_prompt=user_prompt,
+            json_mode=True,
         )
         tokens_in += generation.tokens_in
         tokens_out += generation.tokens_out
 
         raw_features: list[dict[str, Any]] = []
         try:
-            parsed = json.loads(generation.text)
+            # Strip markdown code fences if the LLM wraps output
+            text = generation.text.strip()
+            if text.startswith("```"):
+                text = text.split("\n", 1)[-1]
+                text = text.rsplit("```", 1)[0]
+            parsed = json.loads(text)
             if isinstance(parsed, list):
                 raw_features = parsed
             elif isinstance(parsed, dict):
