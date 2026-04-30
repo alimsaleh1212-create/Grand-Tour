@@ -127,7 +127,10 @@ services:
       GEMINI_EMBED_MODEL: ${GEMINI_EMBED_MODEL:-models/gemini-embedding-001}
       EMBED_DIM: ${EMBED_DIM:-768}
       # ── ML model ─────────────────────────────────────────────────────────
-      ML_MODEL_PATH: ${ML_MODEL_PATH:-../ml/models/travel_style_classifier_v1.joblib}
+      # The trained joblib artifact lives outside the backend Docker build
+      # context (at the repo root in ml/models/).  Mounting it read-only
+      # avoids rebuilding the image every time the model changes.
+      ML_MODEL_PATH: /app/ml_models/travel_style_classifier_v1.joblib
       # ── RAG ──────────────────────────────────────────────────────────────
       DEFAULT_CHUNK_SIZE: ${DEFAULT_CHUNK_SIZE:-500}
       DEFAULT_CHUNK_OVERLAP: ${DEFAULT_CHUNK_OVERLAP:-50}
@@ -145,9 +148,11 @@ services:
       VAULT_ADDR: http://vault:8200
       VAULT_TOKEN: dev-root-token
     ports:
-      - "8000:8000"
+      - "8002:8000"
     networks:
       - stp_network
+    volumes:
+      - ./ml/models:/app/ml_models:ro
     depends_on:
       db:
         condition: service_healthy
