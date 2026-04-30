@@ -32,6 +32,7 @@ dependencies = [
     "joblib==1.4.2",
     "numpy==2.2.0",
     "pandas==2.2.3",
+    "hvac==2.4.0",
 ]
 
 [dependency-groups]
