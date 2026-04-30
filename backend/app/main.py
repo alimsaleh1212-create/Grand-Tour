@@ -392,6 +392,18 @@ def build_app() -> FastAPI:
     return application
 
 
+# ── Vault secret injection ─────────────────────────────────────────────────────
+# Must run BEFORE build_app() because build_app() calls get_settings(), which
+# constructs and lru_cache's Settings. pydantic-settings reads os.environ at
+# construction time — vault must inject secrets into os.environ first.
+# Fallback: VAULT_ADDR absent → skip, backend reads secrets from .env as before.
+_vault_addr = os.environ.get("VAULT_ADDR")
+_vault_token = os.environ.get("VAULT_TOKEN")
+if _vault_addr and _vault_token:
+    from app.core.vault import load_vault_secrets
+
+    load_vault_secrets(_vault_addr, _vault_token)
+
 # ── Module-level app instance ──────────────────────────────────────────────────
 # Uvicorn imports this: `uvicorn app.main:app`
 # Tests import build_app() directly to get a fresh instance per test.
