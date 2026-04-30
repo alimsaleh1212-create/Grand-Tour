@@ -1,26 +1,3 @@
-/**
- * Authentication context — global JWT state shared across the entire tree.
- *
- * Provides:
- *   - `isAuthenticated: boolean`  — true when a valid token is in localStorage.
- *   - `user: { email: string } | null` — decoded claims from the JWT (client-side
- *     only, no extra round-trip needed).
- *   - `login(token: string): void`  — stores token, updates context.
- *   - `logout(): void`              — clears token, redirects to /signin.
- *
- * Bootstrap:
- *   On mount, AuthProvider reads localStorage for an existing token.  If one
- *   exists it is validated with a lightweight `GET /auth/me` call; on 401 the
- *   token is discarded so the user is directed to sign in.
- *
- * Why context (not Zustand / Redux):
- *   Auth state is read by every protected route and the NavBar.  React context
- *   is the idiomatic solution for true cross-cutting singleton state without
- *   adding a state-management dependency.
- *
- * Implemented in Stage 7.
- */
-
 import { createContext, useContext, useState, useEffect } from "react";
 import type { ReactNode } from "react";
 import { apiClient, TOKEN_KEY } from "@/api/client";
@@ -39,12 +16,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [checked, setChecked] = useState(false);
 
   useEffect(() => {
-    // Bootstrap: verify existing token on mount — implemented in Stage 7
-    setChecked(true);
+    const token = localStorage.getItem(TOKEN_KEY);
+    if (!token) {
+      setChecked(true);
+      return;
+    }
+    // Validate token with a lightweight /auth/me call
+    apiClient
+      .get<{ email: string }>("/auth/me")
+      .then((res) => setUser({ email: res.data.email }))
+      .catch(() => localStorage.removeItem(TOKEN_KEY))
+      .finally(() => setChecked(true));
   }, []);
 
-  const login = (_token: string) => {
-    // Implemented in Stage 7
+  const login = (token: string) => {
+    localStorage.setItem(TOKEN_KEY, token);
+    // Decode email from JWT payload (client-side only, no extra round-trip)
+    try {
+      const payload = JSON.parse(atob(token.split(".")[1]));
+      setUser({ email: payload.sub ?? payload.email ?? "user" });
+    } catch {
+      setUser({ email: "user" });
+    }
   };
 
   const logout = () => {
@@ -53,12 +46,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     window.location.href = "/signin";
   };
 
-  if (!checked) return null; // prevent flash before bootstrap completes
+  if (!checked) return null;
 
   return (
-    <AuthContext.Provider
-      value={{ isAuthenticated: user !== null, user, login, logout }}
-    >
+    <AuthContext.Provider value={{ isAuthenticated: user !== null, user, login, logout }}>
       {children}
     </AuthContext.Provider>
   );
@@ -69,6 +60,3 @@ export function useAuth(): AuthState {
   if (!ctx) throw new Error("useAuth must be used inside <AuthProvider>");
   return ctx;
 }
-
-// suppress unused import warning during scaffolding
-void apiClient;
