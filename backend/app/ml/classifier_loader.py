@@ -1,18 +1,59 @@
-"""Load the trained travel-style classifier joblib.
+"""Load the trained travel-style classifier from a joblib file.
 
-Implemented in Stage 3 (training) + Stage 5 (wiring into the agent tool).
+Called ONCE in the FastAPI lifespan.  The resulting Pipeline lives on
+app.state.classifier for the entire process lifetime.  Never call this
+from a request handler — loading a joblib on every request would add
+hundreds of milliseconds per call.
 
-Design (per project brief):
-    "Loading the joblib model on every request is a bug, not a style
-    choice." The loader is called ONCE in the FastAPI lifespan startup
-    and the resulting `Pipeline` lives on `app.state.classifier`.
-
-Public surface (planned):
-    def load_classifier(path: Path) -> Pipeline:
-        # Returns the sklearn Pipeline that the classify_style tool uses.
-        # Raises MLModelError if the file is missing or fails to load —
-        # the app refuses to start in that case.
-
-Path is taken from `Settings.ml_model_path` (added in Stage 1) — a single
-config value, no hard-coded paths anywhere else.
+PUBLIC SURFACE
+--------------
+    def load_classifier(path: Path) -> Pipeline
 """
+
+from __future__ import annotations
+
+import logging
+from pathlib import Path
+
+import joblib
+from sklearn.pipeline import Pipeline
+
+from app.core.exceptions import MLModelError
+
+log = logging.getLogger(__name__)
+
+
+def load_classifier(path: Path) -> Pipeline:
+    """Load and return the travel-style sklearn Pipeline from a joblib file.
+
+    Args:
+        path: Absolute or relative path to the .joblib artifact.
+
+    Returns:
+        Fitted sklearn Pipeline ready for predict / predict_proba calls.
+
+    Raises:
+        MLModelError: If the file is missing, unreadable, or does not contain
+            an sklearn Pipeline.  The app refuses to start in this case.
+    """
+    if not path.exists():
+        raise MLModelError(
+            f"Classifier not found at {path}. "
+            "Run 'uv run python -m ml.src.train' to produce the artifact."
+        )
+
+    try:
+        obj = joblib.load(path)
+    except Exception as exc:
+        raise MLModelError(f"Failed to load classifier from {path}: {exc}") from exc
+
+    if not isinstance(obj, Pipeline):
+        raise MLModelError(
+            f"Expected sklearn Pipeline at {path}, got {type(obj).__name__}."
+        )
+
+    log.info(
+        "ml.classifier_loaded",
+        extra={"path": str(path), "steps": [name for name, _ in obj.steps]},
+    )
+    return obj

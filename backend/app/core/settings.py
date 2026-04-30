@@ -120,6 +120,12 @@ class Settings(BaseSettings):
     gemini_embed_model: str = "models/gemini-embedding-001"
     embed_dim: int = 768
 
+    # ── ML model ─────────────────────────────────────────────────────────────
+    # Path to the trained sklearn Pipeline joblib artifact.  Relative paths
+    # are resolved from the process working directory (backend/).
+    # Default points to ml/models/ relative to the repo root.
+    ml_model_path: str = "../ml/models/travel_style_classifier_v1.joblib"
+
     # ── RAG ──────────────────────────────────────────────────────────────────
     # Chunk size/overlap rationale is documented in the root README.
     # 500 chars / 50 overlap is the default; the ingest CLI can override these.

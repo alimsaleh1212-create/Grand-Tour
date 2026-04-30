@@ -121,6 +121,8 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+import pathlib
+
 from app.core.exceptions import (
     AppError,
     AuthError,
@@ -184,30 +186,54 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     SessionLocal = make_sessionmaker(engine)
     app.state.SessionLocal = SessionLocal
 
-    # ── Step 5: Placeholder singletons for later stages ───────────────────────
-    # These are None now. Each stage populates its own singleton and updates
-    # this comment. Setting them to None explicitly makes app.state inspection
-    # clear about what has and hasn't been initialised yet.
+    # ── Step 5: Singletons for Stage 3, 4, and 5 ─────────────────────────────
 
-    # Stage 3: loaded from settings.model_path via ml/classifier_loader.py
-    # Loading the joblib here (not per-request) is the KEY engineering choice —
-    # a 400 MB model loaded on every request would be ~400 ms × every request.
-    app.state.classifier = None
+    # Stage 3: ML classifier — loaded once from joblib; never per-request.
+    from app.ml.classifier_loader import load_classifier
+
+    app.state.classifier = load_classifier(
+        pathlib.Path(settings.ml_model_path)
+    )
 
     # Stage 4: GeminiEmbedder singleton — avoids re-configuring the Gemini
     # SDK and re-creating the lru_cache entry on every embedding request.
     from app.rag.embedder import get_embedder
 
-    app.state.embedder = get_embedder(
+    embedder = get_embedder(
         api_key=settings.google_api_key.get_secret_value(),
         model=settings.gemini_embed_model,
         embed_dim=settings.embed_dim,
     )
+    app.state.embedder = embedder
 
-    # Stage 5: two Gemini SDK clients — cheap (Flash) and strong (Pro).
-    # Cached here so SDK auth and HTTP session creation happen once, not per tool call.
-    app.state.gemini_cheap = None
-    app.state.gemini_strong = None
+    # Stage 5: VectorStore, Gemini LLM clients, tools, and compiled agent.
+    import httpx as _httpx
+
+    from app.agent.graph import AgentDeps, build_agent
+    from app.agent.llm_clients import get_cheap_client, get_strong_client
+    from app.agent.tools.classify_style import ClassifyStyleTool
+    from app.agent.tools.live_conditions import LiveConditionsTool
+    from app.agent.tools.retrieve_destinations import RetrieveDestinationsTool
+    from app.rag.store import VectorStore
+
+    api_key = settings.google_api_key.get_secret_value()
+    cheap_llm = get_cheap_client(api_key, settings.gemini_max_output_tokens)
+    strong_llm = get_strong_client(api_key, settings.gemini_max_output_tokens)
+    app.state.gemini_cheap = cheap_llm
+    app.state.gemini_strong = strong_llm
+
+    vector_store = VectorStore(SessionLocal)
+    live_http = _httpx.AsyncClient(timeout=15.0)
+    app.state.live_http = live_http
+
+    agent_deps = AgentDeps(
+        cheap_llm=cheap_llm,
+        strong_llm=strong_llm,
+        retriever=RetrieveDestinationsTool(embedder=embedder, store=vector_store),
+        classifier=ClassifyStyleTool(classifier=app.state.classifier),
+        live_tool=LiveConditionsTool(http=live_http),
+    )
+    app.state.agent = build_agent(agent_deps)
 
     logger.info("startup.complete")
 
@@ -223,8 +249,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # then closes all connections. Without this, the DB sees stale connections.
     await engine.dispose()
 
-    # GeminiEmbedder has no async resources to close — the SDK manages its
-    # own HTTP session. No cleanup needed here for app.state.embedder.
+    # Close the embedder's httpx session (Stage 4).
+    await app.state.embedder.aclose()
+
+    # Close the live-conditions shared httpx session (Stage 5).
+    if hasattr(app.state, "live_http"):
+        await app.state.live_http.aclose()
 
     logger.info("shutdown.complete")
 
