@@ -49,6 +49,7 @@ from app.agent.llm_clients import GeminiClient
 from app.agent.prompts import (
     SYSTEM_FEATURE_EXTRACTOR,
     SYSTEM_FINAL_SYNTHESIS,
+    ExtractedDestinations,
     build_feature_extractor_prompt,
     build_synthesis_prompt,
 )
@@ -136,26 +137,32 @@ def build_agent(deps: AgentDeps) -> Any:
         generation = await deps.cheap_llm.generate(
             system_prompt=SYSTEM_FEATURE_EXTRACTOR,
             user_prompt=user_prompt,
-            json_mode=True,
+            response_schema=ExtractedDestinations,
         )
         tokens_in += generation.tokens_in
         tokens_out += generation.tokens_out
 
         raw_features: list[dict[str, Any]] = []
-        try:
-            # Strip markdown code fences if the LLM wraps output
-            text = generation.text.strip()
-            if text.startswith("```"):
-                text = text.split("\n", 1)[-1]
-                text = text.rsplit("```", 1)[0]
-            parsed = json.loads(text)
-            if isinstance(parsed, list):
-                raw_features = parsed
-            elif isinstance(parsed, dict):
-                raw_features = [parsed]
-        except (json.JSONDecodeError, ValueError) as exc:
-            errors.append(f"extract_node JSON parse failed: {exc}")
-            log.warning("agent.extract.parse_failed", extra={"error": str(exc)})
+        if generation.parsed is not None:
+            # Schema-validated path — Gemini serialised correctly
+            raw_features = [item.model_dump() for item in generation.parsed.items]
+        else:
+            # Fallback: text was returned but schema parse failed — try manual parse
+            try:
+                text = generation.text.strip()
+                if text.startswith("```"):
+                    text = text.split("\n", 1)[-1].rsplit("```", 1)[0]
+                parsed_json = json.loads(text)
+                if isinstance(parsed_json, dict) and "items" in parsed_json:
+                    raw_features = parsed_json["items"]
+                elif isinstance(parsed_json, list):
+                    raw_features = parsed_json
+            except (json.JSONDecodeError, ValueError) as exc:
+                errors.append(f"extract_node JSON parse failed: {exc}")
+                log.warning(
+                    "agent.extract.parse_failed",
+                    extra={"error": str(exc), "text_preview": generation.text[:200]},
+                )
 
         log.info(
             "agent.extract.success",

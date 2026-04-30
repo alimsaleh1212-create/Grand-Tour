@@ -21,8 +21,43 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from pydantic import BaseModel, Field
+
 if TYPE_CHECKING:
     from app.agent.state import AgentState
+
+# ── Extraction schema (used as response_schema for structured Gemini output) ──
+
+
+class ExtractedDestination(BaseModel):
+    """One destination extracted from RAG chunks by the cheap LLM."""
+
+    destination_name: str
+    region: str = Field(
+        description="One of: Europe, Asia, Americas, Africa, Middle East, Oceania"
+    )
+    avg_temp_c: float
+    cost_per_day_usd: float
+    safety_index: float
+    language_difficulty: float
+    activity_density: float
+    nightlife_score: float
+    cultural_sites: float
+    nature_score: float
+    beach_score: float
+    family_friendly: float
+    infrastructure: float
+    luxury_index: float
+    latitude: float
+    longitude: float
+    currency_code: str
+
+
+class ExtractedDestinations(BaseModel):
+    """Wrapper so Gemini response_schema gets a top-level object (not bare list)."""
+
+    items: list[ExtractedDestination]
+
 
 # ── System prompts (static) ────────────────────────────────────────────────────
 
@@ -33,7 +68,8 @@ Your job: given a list of travel knowledge chunks and a user question, identify 
 all distinct destination candidates mentioned in the chunks and extract their \
 numeric travel features.
 
-Output a JSON array (one object per destination) with these exact keys:
+Return a JSON object with a single key "items" whose value is an array. \
+Each array element represents one destination with these fields:
   destination_name  (string, e.g. "Kyoto")
   region            (string — one of: Europe, Asia, Americas, Africa, Middle East, Oceania)
   avg_temp_c        (float, average annual temperature in °C)
@@ -56,7 +92,6 @@ Rules:
 - Extract values from the text whenever available. Use your world knowledge to \
   fill gaps with reasonable estimates — do not leave fields null.
 - Only include destinations that appear in the provided chunks.
-- Return ONLY the JSON array, no prose.
 """
 
 SYSTEM_FINAL_SYNTHESIS = """\
