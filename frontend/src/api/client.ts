@@ -112,6 +112,7 @@ export type SseEvent =
   | { type: "answer"; text: string }
   | { type: "booking_request"; flight: Record<string, unknown> }
   | { type: "done"; run_id: number; cost_usd: number; errors: string[] }
+  | { type: "webhook_available"; run_id: number }
   | { type: "error"; detail: string };
 
 // ── Bookings ──────────────────────────────────────────────────────────────
@@ -138,6 +139,12 @@ export type BookingOut = {
   status: string;
   created_at: string;
 };
+
+// ── Webhook notify ────────────────────────────────────────────────────────
+export async function notifyRun(runId: number): Promise<{ status: string }> {
+  const res = await apiClient.post<{ status: string }>(`/runs/${runId}/notify`);
+  return res.data;
+}
 
 // ── SSE streaming helper ──────────────────────────────────────────────────
 export async function* streamChat(

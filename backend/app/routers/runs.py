@@ -11,14 +11,16 @@ from __future__ import annotations
 import logging
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import NotFoundError
+from app.core.settings import get_settings
 from app.deps.auth import CurrentUser
 from app.deps.db import get_session
-from app.schemas.chat import RunDetailOut, RunOut
+from app.schemas.chat import NotifyResponse, RunDetailOut, RunOut
 from app.services import run_service
+from app.webhook.publisher import maybe_publish
 
 log = logging.getLogger(__name__)
 
@@ -52,3 +54,50 @@ async def get_run(
     if run is None:
         raise NotFoundError("Run not found.")
     return RunDetailOut.model_validate(run)
+
+
+@router.post("/{run_id}/notify", response_model=NotifyResponse, status_code=status.HTTP_200_OK)
+async def notify_run(
+    run_id: int,
+    request: Request,
+    user: CurrentUser,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> NotifyResponse:
+    """Send run result to Discord webhook configured in server settings.
+
+    Requires DISCORD_WEBHOOK_URL to be set in server environment.
+    Returns 400 if not configured. Returns 404 if run not found or
+    belongs to a different user.
+    """
+    settings = get_settings()
+    discord_url = settings.discord_webhook_url
+    if not discord_url:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Discord webhook not configured on this server.",
+        )
+
+    run = await run_service.get_run_for_user(session, user_id=user.id, run_id=run_id)
+    if run is None:
+        raise NotFoundError("Run not found.")
+
+    question = run.question or ""
+    answer = run.final_answer or ""
+
+    await maybe_publish(
+        url=discord_url,
+        run_id=run_id,
+        question=question,
+        answer=answer,
+        session_factory=request.app.state.SessionLocal,
+    )
+
+    # maybe_publish updates webhook_status on the run; read result from DB
+    updated = await run_service.get_run_for_user(session, user_id=user.id, run_id=run_id)
+    delivered = updated is not None and updated.webhook_status == "delivered"
+
+    log.info(
+        "runs.notify",
+        extra={"run_id": run_id, "user_id": user.id, "delivered": delivered},
+    )
+    return NotifyResponse(status="sent" if delivered else "failed")

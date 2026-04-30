@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from decimal import Decimal
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -92,3 +92,9 @@ class RunDetailOut(BaseModel):
     started_at: datetime
     finished_at: datetime | None
     tool_calls: list[ToolCallOut]
+
+
+class NotifyResponse(BaseModel):
+    """Response from POST /runs/{id}/notify."""
+
+    status: Literal["sent", "failed"]

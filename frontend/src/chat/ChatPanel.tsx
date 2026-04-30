@@ -4,7 +4,7 @@ import Composer from "./Composer";
 import HistorySidebar from "./HistorySidebar";
 import BookingModal from "./BookingModal";
 import { RetrieveCards, ClassifyCards, LiveCards, TravelPlanAnswer } from "./TravelPlanCards";
-import { streamChat } from "@/api/client";
+import { streamChat, notifyRun } from "@/api/client";
 import type { SseChunk, SseClassification, SseLiveConditions, BookingOut } from "@/api/client";
 import ToolBadge from "@/components/ToolBadge";
 import Spinner from "@/components/Spinner";
@@ -51,6 +51,8 @@ export default function ChatPanel() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [streaming, setStreaming] = useState(false);
   const [bookingTarget, setBookingTarget] = useState<BookingTarget | null>(null);
+  const [webhookRunId, setWebhookRunId] = useState<number | null>(null);
+  const [webhookStatus, setWebhookStatus] = useState<"idle" | "sending" | "sent" | "failed">("idle");
   const abortRef = useRef<AbortController | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
@@ -88,6 +90,8 @@ export default function ChatPanel() {
 
     setMessages((prev) => [...prev, userMsg, agentMsg]);
     setStreaming(true);
+    setWebhookRunId(null);
+    setWebhookStatus("idle");
     scrollToBottom();
 
     try {
@@ -112,6 +116,11 @@ export default function ChatPanel() {
           updateAgent(agentId, { answer: event.text });
         } else if (event.type === "done") {
           updateAgent(agentId, { streaming: false, runId: event.run_id, costUsd: event.cost_usd });
+          setWebhookRunId(null);
+          setWebhookStatus("idle");
+        } else if (event.type === "webhook_available") {
+          setWebhookRunId(event.run_id);
+          setWebhookStatus("idle");
         } else if (event.type === "booking_request") {
           setBookingTarget({ flight: event.flight, runId: undefined });
         } else if (event.type === "error") {
@@ -131,6 +140,19 @@ export default function ChatPanel() {
       updateAgent(agentId, { streaming: false });
     }
   }, [streaming]);
+
+  const handleDiscordNotify = useCallback(async () => {
+    if (!webhookRunId) return;
+    const confirmed = window.confirm("Send this travel plan to Discord?");
+    if (!confirmed) return;
+    setWebhookStatus("sending");
+    try {
+      const result = await notifyRun(webhookRunId);
+      setWebhookStatus(result.status === "sent" ? "sent" : "failed");
+    } catch {
+      setWebhookStatus("failed");
+    }
+  }, [webhookRunId]);
 
   const handleBookFlight = useCallback(
     (flight: Record<string, unknown>, runId?: number) => {
@@ -176,6 +198,26 @@ export default function ChatPanel() {
           )
         )}
       </div>
+
+      {/* Discord notify button — shown after agent completes when server has DISCORD_WEBHOOK_URL set */}
+      {webhookRunId !== null && !streaming && (
+        <div style={discordBarStyle}>
+          {webhookStatus === "idle" && (
+            <button onClick={handleDiscordNotify} style={discordBtnStyle}>
+              📤 Send to Discord
+            </button>
+          )}
+          {webhookStatus === "sending" && (
+            <span style={discordMsgStyle}>Sending to Discord…</span>
+          )}
+          {webhookStatus === "sent" && (
+            <span style={{ ...discordMsgStyle, color: "var(--teal)" }}>✓ Sent to Discord</span>
+          )}
+          {webhookStatus === "failed" && (
+            <span style={{ ...discordMsgStyle, color: "var(--error)" }}>✗ Discord delivery failed</span>
+          )}
+        </div>
+      )}
 
       <Composer onSend={handleSend} disabled={streaming} />
 
@@ -411,4 +453,31 @@ const costLabel: React.CSSProperties = {
   fontFamily: "var(--font-body)",
   fontWeight: 600,
   color: "var(--ink-faint)",
+};
+
+const discordBarStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  padding: "8px 16px",
+  borderTop: "1px solid var(--border)",
+  background: "var(--cream)",
+};
+
+const discordBtnStyle: React.CSSProperties = {
+  padding: "6px 18px",
+  background: "#5865F2",
+  color: "white",
+  border: "none",
+  borderRadius: 6,
+  fontSize: 13,
+  fontFamily: "var(--font-body)",
+  fontWeight: 600,
+  cursor: "pointer",
+};
+
+const discordMsgStyle: React.CSSProperties = {
+  fontSize: 13,
+  fontFamily: "var(--font-body)",
+  color: "var(--ink-muted)",
 };

@@ -26,18 +26,18 @@ import json
 import logging
 from typing import Annotated, Any, AsyncGenerator
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Request, status
+from fastapi import APIRouter, Depends, Request, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppError
+from app.core.settings import get_settings
 from app.db.models.agent_run import AgentRun
 from app.deps.auth import CurrentUser
 from app.deps.db import get_session
 from app.schemas.chat import ChatRequest, ChatResponse, ToolFireSummary
 from app.services import run_service
-from app.webhook.publisher import maybe_publish
 
 log = logging.getLogger(__name__)
 
@@ -152,7 +152,6 @@ async def chat_stream(
     request: Request,
     user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_session)],
-    background: BackgroundTasks,
 ) -> StreamingResponse:
     """Stream agent node results as Server-Sent Events.
 
@@ -238,7 +237,7 @@ async def chat_stream(
                 final_answer=final_answer,
                 total_tokens_cheap=tokens_cheap,
                 total_tokens_strong=tokens_strong,
-                webhook_status="pending" if body.webhook_url else None,
+                webhook_status=None,
             )
             await session.commit()
 
@@ -249,16 +248,9 @@ async def chat_stream(
                 "errors": errors,
             })
 
-            # Fire webhook in background (failure never breaks the stream)
-            if body.webhook_url:
-                background.add_task(
-                    maybe_publish,
-                    url=body.webhook_url,
-                    run_id=run_id,
-                    question=body.question,
-                    answer=final_answer,
-                    session_factory=request.app.state.SessionLocal,
-                )
+            # Signal frontend that Discord notification is available
+            if get_settings().discord_webhook_url:
+                yield _sse({"type": "webhook_available", "run_id": run_id})
 
         except Exception as exc:
             log.error("chat.stream.error", exc_info=True)
@@ -287,7 +279,6 @@ async def chat(
     request: Request,
     user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_session)],
-    background: BackgroundTasks,
 ) -> ChatResponse:
     """Run the full agent and return a single ChatResponse when done.
 
@@ -328,19 +319,9 @@ async def chat(
         final_answer=final_answer,
         total_tokens_cheap=tokens_cheap,
         total_tokens_strong=tokens_strong,
-        webhook_status="pending" if body.webhook_url else None,
+        webhook_status=None,
     )
     await session.commit()
-
-    if body.webhook_url:
-        background.add_task(
-            maybe_publish,
-            url=body.webhook_url,
-            run_id=run_id,
-            question=body.question,
-            answer=final_answer,
-            session_factory=request.app.state.SessionLocal,
-        )
 
     return ChatResponse(
         run_id=run_id,
