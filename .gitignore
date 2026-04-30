@@ -62,3 +62,4 @@ pgadmin_data/
 
 resources/
 docs/
+.worktrees/
