@@ -269,11 +269,12 @@ class LiveConditionsTool(BaseTool[LiveConditionsQuery, LiveConditions]):
         reraise=True,
     )
     async def _fetch_fx(self, base: str, quote: str) -> dict[str, object]:
-        url = "https://api.exchangerate.host/latest"
-        params = {"base": base, "symbols": quote}
-        r = await self._http.get(url, params=params, timeout=10.0)
+        url = f"https://open.er-api.com/v6/latest/{base}"
+        r = await self._http.get(url, timeout=10.0)
         r.raise_for_status()
         body = r.json()
+        if body.get("result") != "success":
+            raise ExternalAPIError(f"FX API error: {body.get('error-type')}")
         rates: dict[str, float] = body.get("rates", {})
         rate = rates.get(quote)
         if rate is None:

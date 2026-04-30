@@ -217,8 +217,9 @@ def build_agent(deps: AgentDeps) -> Any:
         candidates = raw_features[:_MAX_LIVE_CANDIDATES]
 
         today = date.today()
-        trip_start = today + timedelta(days=30)
-        trip_end = trip_start + timedelta(days=7)
+        # Open-Meteo forecast max = 16 days; use next 7 days for live conditions
+        trip_start = today + timedelta(days=1)
+        trip_end = today + timedelta(days=7)
 
         async def _live_one(feat_dict: dict[str, Any]) -> Any:
             dest_name: str = str(feat_dict.get("destination_name", ""))

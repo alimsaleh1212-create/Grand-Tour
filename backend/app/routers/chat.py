@@ -81,6 +81,68 @@ def _serialise_list(items: list[Any]) -> list[dict[str, Any]]:
     return result
 
 
+def _serialise_classifications(classifications: list[Any]) -> list[dict[str, Any]]:
+    """Normalise ClassifyResult → frontend SseClassification shape.
+
+    Backend uses `predicted_style`; frontend expects `label`.
+    """
+    out = []
+    for c in classifications:
+        if c is None:
+            continue
+        d = c.model_dump() if hasattr(c, "model_dump") else dict(c)
+        # Rename predicted_style → label
+        if "predicted_style" in d and "label" not in d:
+            d["label"] = d.pop("predicted_style")
+        out.append(d)
+    return out
+
+
+def _serialise_live(
+    raw_features: list[dict[str, Any]], live_data: list[Any]
+) -> list[dict[str, Any]]:
+    """Normalise LiveConditions → frontend SseLiveConditions shape.
+
+    Adds destination_name (from raw_features) and maps field names:
+        WeatherWindow.precipitation_mm  → weather.precip_mm
+        WeatherWindow.avg_temp_c        → weather.temp_c
+        FlightQuote                     → flights list (price_total → price)
+    """
+    out = []
+    for i, item in enumerate(live_data):
+        if item is None:
+            continue
+        dest_name = raw_features[i].get("destination_name", "") if i < len(raw_features) else ""
+        d = item.model_dump() if hasattr(item, "model_dump") else dict(item)
+
+        # Normalise weather sub-object
+        w = d.get("weather")
+        if w:
+            d["weather"] = {
+                "temp_c": w.get("avg_temp_c"),
+                "min_temp_c": w.get("min_temp_c"),
+                "max_temp_c": w.get("max_temp_c"),
+                "precip_mm": w.get("precipitation_mm"),
+                "description": f"{w.get('avg_temp_c', '?')}°C avg",
+            }
+
+        # Normalise flights: FlightQuote → list with price field
+        fq = d.get("flights")
+        if fq:
+            d["flights"] = [{
+                "origin": fq.get("origin"),
+                "destination": fq.get("destination"),
+                "price": fq.get("price_total"),
+                "currency": fq.get("currency", "USD"),
+                "available": fq.get("available", False),
+                "reason": fq.get("reason"),
+            }] if fq.get("available") else []
+
+        d["destination_name"] = dest_name
+        out.append(d)
+    return out
+
+
 # ── streaming endpoint ────────────────────────────────────────────────────────
 
 
@@ -111,6 +173,7 @@ async def chat_stream(
         tool_summaries: list[ToolFireSummary] = []
         final_answer = ""
         errors: list[str] = []
+        raw_features: list[dict[str, Any]] = []
 
         try:
             yield _sse({"type": "start", "question": body.question})
@@ -130,11 +193,14 @@ async def chat_stream(
                             session, run_id, hits, tool_summaries
                         )
 
+                    elif node_name == "extract":
+                        raw_features = node_output.get("raw_features") or []
+
                     elif node_name == "classify":
                         classifications = node_output.get("classifications") or []
                         yield _sse({
                             "type": "classify_result",
-                            "classifications": _serialise_list(classifications),
+                            "classifications": _serialise_classifications(classifications),
                         })
                         await append_classify_call(
                             session, run_id, classifications, tool_summaries
@@ -144,7 +210,7 @@ async def chat_stream(
                         live_data = node_output.get("live_data") or []
                         yield _sse({
                             "type": "live_result",
-                            "live_data": _serialise_list(live_data),
+                            "live_data": _serialise_live(raw_features, live_data),
                         })
                         await append_live_call(
                             session, run_id, live_data, tool_summaries
