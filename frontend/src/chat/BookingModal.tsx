@@ -6,12 +6,19 @@ import { useAuth } from "@/auth/AuthContext";
 
 interface FlightInfo {
   origin?: string;
+  origin_city?: string;
   destination?: string;
+  destination_city?: string;
+  destination_airport?: string;
+  departure_time?: string;
+  arrival_time?: string;
+  duration_hours?: number;
+  frequency?: string;
+  airline?: string;
   price?: number;
   currency?: string;
-  departure_date?: string;
-  airline?: string;
-  flight_number?: string;
+  available?: boolean;
+  reason?: string;
 }
 
 interface Props {
@@ -38,7 +45,7 @@ export default function BookingModal({ flight, runId, onClose, onBooked }: Props
         run_id: runId ?? null,
         origin_iata: (flight.origin ?? "???").toUpperCase().slice(0, 3),
         destination_iata: (flight.destination ?? "???").toUpperCase().slice(0, 3),
-        departure_date: flight.departure_date ?? new Date().toISOString().slice(0, 10),
+        departure_date: new Date().toISOString().slice(0, 10),
         passenger_name: name,
         passenger_email: email,
         price_total: flight.price ?? 0,
@@ -76,10 +83,17 @@ export default function BookingModal({ flight, runId, onClose, onBooked }: Props
             <span style={routeArrow}>→</span>
             <span style={iataCode}>{flight.destination ?? "???"}</span>
           </div>
+          {(flight.origin_city || flight.destination_city) && (
+            <div style={{ fontSize: 13, opacity: 0.85, fontFamily: "var(--font-body)" }}>
+              {flight.origin_city ?? ""}{flight.origin_city && flight.destination_city ? " to " : ""}{flight.destination_city ?? ""}
+            </div>
+          )}
           <div style={flightMeta}>
-            {flight.departure_date && <span>📅 {flight.departure_date}</span>}
+            {flight.departure_time && <span>dep {flight.departure_time}</span>}
+            {flight.arrival_time && <span>arr {flight.arrival_time}</span>}
+            {flight.duration_hours != null && <span>{flight.duration_hours}h</span>}
             {flight.airline && <span>✈ {flight.airline}</span>}
-            {flight.flight_number && <span>#{flight.flight_number}</span>}
+            {flight.frequency && <span>{flight.frequency}</span>}
           </div>
           {flight.price != null && (
             <div style={priceDisplay}>

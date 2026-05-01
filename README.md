@@ -65,7 +65,7 @@ docker compose exec backend python -m rag.scripts.ingest
 open http://localhost:3000
 ```
 
-The backend API docs are at `http://localhost:8000/docs` (dev mode only).
+The backend API docs are at `http://localhost:8002/docs` (dev mode only).
 
 ---
 
@@ -271,7 +271,7 @@ Costs are recorded per run in `agent_runs.cost_usd` (calculated in `services/run
 | `GET` | `/bookings/{id}` | ✅ | One booking detail |
 | `GET` | `/health` | — | Liveness probe |
 
-Full interactive docs: `http://localhost:8000/docs`
+Full interactive docs: `http://localhost:8002/docs`
 
 ---
 

@@ -95,12 +95,19 @@ export type SseLiveConditions = {
   fx?: { base?: string; quote?: string; rate?: number };
   flights?: Array<{
     origin?: string;
+    origin_city?: string;
     destination?: string;
+    destination_city?: string;
+    destination_airport?: string;
+    departure_time?: string;
+    arrival_time?: string;
+    duration_hours?: number;
+    frequency?: string;
+    airline?: string;
     price?: number;
     currency?: string;
-    departure_date?: string;
-    airline?: string;
-    flight_number?: string;
+    available?: boolean;
+    reason?: string;
   }>;
 };
 

@@ -113,6 +113,7 @@ class GeminiClient:
         response_schema: type[BaseModel] | None = None,
         json_mode: bool = False,
         temperature: float = 0.0,
+        max_output_tokens: int | None = None,
     ) -> GenerationResult:
         """Generate a completion from the model.
 
@@ -123,13 +124,18 @@ class GeminiClient:
             response_schema: Optional Pydantic model.  When provided, the
                 model is instructed to return valid JSON matching the schema,
                 and the result is parsed into `GenerationResult.parsed`.
+            json_mode: If True, force JSON output without a schema.
             temperature: Sampling temperature.  Default 0.0 for determinism.
+            max_output_tokens: Per-call override.  When None, uses the client's
+                default (set at construction time).  Use a higher value for
+                extraction calls that produce long structured JSON.
 
         Returns:
             GenerationResult with text, optional parsed model, and token counts.
         """
+        token_limit = max_output_tokens if max_output_tokens is not None else self._max_tokens
         config_kwargs: dict[str, Any] = {
-            "max_output_tokens": self._max_tokens,
+            "max_output_tokens": token_limit,
             "temperature": temperature,
             "system_instruction": system_prompt,
         }

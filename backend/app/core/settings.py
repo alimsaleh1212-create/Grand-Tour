@@ -106,7 +106,9 @@ class Settings(BaseSettings):
     gemini_cheap_model: str = "gemini-2.5-flash"
     gemini_strong_model: str = "gemini-2.5-pro"
     # Hard cap on output length. Prevents exfiltration attempts and runaway costs.
-    gemini_max_output_tokens: int = 2048
+    # 4096 gives the cheap model headroom for structured extraction (5 destinations
+    # × 15 fields = ~2500 tokens of JSON).  The strong model uses less for synthesis.
+    gemini_max_output_tokens: int = 4096
     # Tenacity retry policy for transient Gemini errors (5xx, network timeouts).
     # Applied in agent/llm_clients.py.
     llm_max_retries: int = 3

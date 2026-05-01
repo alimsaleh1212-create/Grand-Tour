@@ -184,7 +184,7 @@ Each stage ends with a **Validation** gate. We do not advance without passing.
 **Validation:**
 - `uv sync` succeeds in `backend/`
 - `uv run pre-commit run --all-files` passes
-- `docker compose up -d db backend` → `curl localhost:8000/health` returns `{"status":"ok"}`
+- `docker compose up -d db backend` → `curl localhost:8002/health` returns `{"status":"ok"}`
 - `pytest tests/` runs (zero or one trivial test, all green)
 - `mypy --strict app/` passes
 

@@ -3,7 +3,7 @@
  *
  * Dev server:
  *   - Runs on port 5173.
- *   - Proxies `/api` to the FastAPI backend (http://localhost:8000) so the
+ *   - Proxies `/api` to the FastAPI backend (http://localhost:8002) so the
  *     browser never needs CORS during local development.
  *
  * Production build:
@@ -29,7 +29,7 @@ export default defineConfig({
     port: 5173,
     proxy: {
       "/api": {
-        target: "http://localhost:8000",
+        target: "http://localhost:8002",
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api/, ""),
       },
