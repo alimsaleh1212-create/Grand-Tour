@@ -52,6 +52,7 @@ manually to the first migration.
 from __future__ import annotations
 
 import asyncio
+import os
 from logging.config import fileConfig
 
 from alembic import context
@@ -75,6 +76,18 @@ if config.config_file_name is not None:
 
 # The metadata object that autogenerate compares against the live DB schema.
 target_metadata = Base.metadata
+
+# Inject Vault secrets into os.environ BEFORE constructing Settings.
+# pydantic-settings reads os.environ at construction time, and the required
+# fields (postgres_password, jwt_secret, google_api_key) live in Vault in
+# Docker.  Without this, Alembic crashes with ValidationError because the
+# vault-loader in app.main never runs during `alembic upgrade head`.
+_vault_addr = os.environ.get("VAULT_ADDR")
+_vault_token = os.environ.get("VAULT_TOKEN")
+if _vault_addr and _vault_token:
+    from app.core.vault import load_vault_secrets
+
+    load_vault_secrets(_vault_addr, _vault_token)
 
 # Inject the DB URL from settings (overrides the empty sqlalchemy.url in ini).
 settings = get_settings()

@@ -256,25 +256,51 @@ class TestClassifyStyleTool:
 
 class TestLiveConditionsTool:
     @pytest.mark.asyncio
-    async def test_no_iata_returns_unavailable_flights(self) -> None:
+    async def test_unknown_city_returns_unavailable_flights(self) -> None:
         from app.agent.tools.live_conditions import LiveConditionsTool, LiveConditionsQuery
 
         fake_http = AsyncMock()
-        # Weather and FX will fail gracefully since fake_http has no real responses
         tool = LiveConditionsTool(http=fake_http)
 
         args = LiveConditionsQuery(
-            city="Kyoto",
-            latitude=35.0,
-            longitude=135.7,
+            city="Ulan Bator",
+            latitude=47.9,
+            longitude=106.9,
             date_from=date(2025, 6, 1),
             date_to=date(2025, 6, 8),
-            # No IATA codes
         )
-        # _get_flights should return FlightQuote(available=False) without calling http
         result = await tool._get_flights(args)
         assert result.available is False
         assert result.reason is not None
+
+    @pytest.mark.asyncio
+    async def test_known_city_returns_schedule(self) -> None:
+        from app.agent.tools.live_conditions import LiveConditionsTool, LiveConditionsQuery
+
+        fake_http = AsyncMock()
+        tool = LiveConditionsTool(http=fake_http)
+
+        args = LiveConditionsQuery(
+            city="Dubai",
+            latitude=25.2,
+            longitude=55.3,
+            date_from=date(2025, 6, 1),
+            date_to=date(2025, 6, 8),
+        )
+        result = await tool._get_flights(args)
+        assert result.available is True
+        assert result.destination == "DXB"
+        assert result.destination_city == "Dubai"
+        assert result.destination_airport == "Dubai International"
+        assert result.origin == "LHR"
+        assert result.origin_city == "London"
+        assert result.departure_time == "22:00"
+        assert result.arrival_time == "08:15+1"
+        assert result.duration_hours == pytest.approx(6.25)
+        assert result.frequency == "Daily"
+        assert result.airline == "Emirates"
+        assert result.price_total is not None
+        assert result.price_total > 0
 
     @pytest.mark.asyncio
     async def test_same_currency_pair_returns_rate_one(self) -> None:
@@ -432,3 +458,76 @@ class TestBuildAgent:
 
         assert "final_answer" in state
         assert "Bali" in state["final_answer"]
+
+
+# ─── JSON truncation repair ──────────────────────────────────────────────────
+
+
+class TestRepairTruncatedJson:
+    def test_repair_truncated_after_complete_object(self) -> None:
+        from app.agent.graph import _repair_truncated_json
+        import json
+
+        # Truncated after one complete object, with a trailing comma
+        truncated = (
+            '{"items": [{"destination_name": "Rome", "region": "Europe", '
+            '"avg_temp_c": 15.0, "cost_per_day_usd": 120.0, "safety_index": 7.0},'
+        )
+        result = _repair_truncated_json(truncated)
+        assert result is not None
+        parsed = json.loads(result)
+        assert len(parsed["items"]) == 1
+        assert parsed["items"][0]["destination_name"] == "Rome"
+
+    def test_repair_truncated_with_complete_first_item(self) -> None:
+        from app.agent.graph import _repair_truncated_json
+        import json
+
+        # First item complete, second item partial
+        truncated = (
+            '{"items": ['
+            '{"destination_name": "Paris", "region": "Europe", "avg_temp_c": 12.0, '
+            '"cost_per_day_usd": 150.0, "safety_index": 7.0, '
+            '"language_difficulty": 3.0, "activity_density": 8.0, '
+            '"nightlife_score": 6.0, "cultural_sites": 9.0, '
+            '"nature_score": 5.0, "beach_score": 2.0, '
+            '"family_friendly": 7.0, "infrastructure": 9.0, '
+            '"luxury_index": 7.0, "latitude": 48.86, "longitude": 2.35, '
+            '"currency_code": "EUR"},'
+            '{"destination_name": "Rome", "region": "Europe", '
+            '"avg_temp_c": 16.'
+        )
+        result = _repair_truncated_json(truncated)
+        assert result is not None
+        parsed = json.loads(result)
+        assert len(parsed["items"]) == 1
+        assert parsed["items"][0]["destination_name"] == "Paris"
+
+    def test_repair_returns_none_on_empty(self) -> None:
+        from app.agent.graph import _repair_truncated_json
+
+        assert _repair_truncated_json("") is None
+        assert _repair_truncated_json("not json at all") is None
+
+    def test_repair_valid_json_unchanged(self) -> None:
+        from app.agent.graph import _repair_truncated_json
+        import json
+
+        valid = '{"items": [{"destination_name": "Tokyo", "region": "Asia"}]}'
+        result = _repair_truncated_json(valid)
+        assert result is not None
+        parsed = json.loads(result)
+        assert parsed["items"][0]["destination_name"] == "Tokyo"
+
+    def test_no_complete_object_returns_none(self) -> None:
+        from app.agent.graph import _repair_truncated_json
+
+        # No closing brace at all — the entire first object is truncated.
+        # Nothing usable can be recovered.
+        truncated = (
+            '{"items": [{"destination_name": "Paris", "region": "Europe", '
+            '"avg_temp_c": 12.0, "cost_per_day_usd": 150.0'
+        )
+        result = _repair_truncated_json(truncated)
+        # We cannot recover any complete destination objects here
+        assert result is None

@@ -192,10 +192,20 @@ def build_synthesis_prompt(state: AgentState) -> str:  # type: ignore[type-arg]
             parts.append(f"FX: 1 {lc.fx.base} = {lc.fx.rate:.4f} {lc.fx.quote}")
         if lc.flights:
             if lc.flights.available and lc.flights.price_total:
-                parts.append(
-                    f"Flights: ~{lc.flights.currency} "
-                    f"{lc.flights.price_total:.0f}"
-                )
+                fl = lc.flights
+                flight_parts = [
+                    f"~{fl.currency} {fl.price_total:.0f}",
+                    f"{fl.origin_city} ({fl.origin}) → {fl.destination_city} ({fl.destination})",
+                ]
+                if fl.airline:
+                    flight_parts.append(fl.airline)
+                if fl.departure_time and fl.arrival_time:
+                    flight_parts.append(f"dep {fl.departure_time}, arr {fl.arrival_time}")
+                if fl.duration_hours:
+                    flight_parts.append(f"{fl.duration_hours:.1f}h")
+                if fl.frequency:
+                    flight_parts.append(fl.frequency)
+                parts.append("Flights: " + ", ".join(flight_parts))
             else:
                 parts.append(f"Flights: {lc.flights.reason or 'unavailable'}")
         live_lines.append(" | ".join(parts))

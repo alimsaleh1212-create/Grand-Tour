@@ -124,12 +124,19 @@ interface LiveCardsProps {
 
 type LiveFlightItem = {
   origin?: string;
+  origin_city?: string;
   destination?: string;
+  destination_city?: string;
+  destination_airport?: string;
+  departure_time?: string;
+  arrival_time?: string;
+  duration_hours?: number;
+  frequency?: string;
+  airline?: string;
   price?: number;
   currency?: string;
-  departure_date?: string;
-  airline?: string;
-  flight_number?: string;
+  available?: boolean;
+  reason?: string;
 };
 
 export function LiveCards({ liveData, onBookFlight }: LiveCardsProps) {
@@ -198,14 +205,26 @@ function LiveConditionCard({ data, onBookFlight }: { data: SseLiveConditions; on
             {data.flights.map((f, fi) => (
               <div key={fi} style={flightRow}>
                 <div style={{ flex: 1 }}>
-                  <span style={{ fontFamily: "var(--font-display)", fontSize: 15, fontWeight: 600 }}>
-                    {f.origin} → {f.destination}
-                  </span>
-                  {f.departure_date && (
-                    <span style={{ fontSize: 12, color: "var(--ink-muted)", marginLeft: 8 }}>{f.departure_date}</span>
+                  <div style={{ fontFamily: "var(--font-display)", fontSize: 15, fontWeight: 600 }}>
+                    {f.origin_city ? `${f.origin_city} ` : ""}{f.origin && <span style={{ opacity: 0.7 }}>({f.origin})</span>}
+                    {" → "}
+                    {f.destination_city ? `${f.destination_city} ` : ""}{f.destination && <span style={{ opacity: 0.7 }}>({f.destination})</span>}
+                  </div>
+                  {(f.departure_time || f.arrival_time || f.duration_hours || f.airline || f.frequency) && (
+                    <div style={{ fontSize: 12, color: "var(--ink-muted)", marginTop: 3, fontFamily: "var(--font-body)" }}>
+                      {f.departure_time && <span>dep {f.departure_time}</span>}
+                      {f.departure_time && f.arrival_time && <span> → </span>}
+                      {f.arrival_time && <span>arr {f.arrival_time}</span>}
+                      {f.duration_hours != null && <span> · {f.duration_hours}h</span>}
+                      {(f.airline || f.frequency) && (
+                        <span> · {[f.airline, f.frequency].filter(Boolean).join(", ")}</span>
+                      )}
+                    </div>
                   )}
-                  {f.airline && (
-                    <span style={{ fontSize: 12, color: "var(--ink-muted)", marginLeft: 4 }}>· {f.airline}</span>
+                  {f.destination_airport && (
+                    <div style={{ fontSize: 11, color: "var(--ink-faint)", marginTop: 2, fontFamily: "var(--font-body)" }}>
+                      {f.destination_airport}
+                    </div>
                   )}
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>

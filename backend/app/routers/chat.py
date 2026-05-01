@@ -126,12 +126,20 @@ def _serialise_live(
                 "description": f"{w.get('avg_temp_c', '?')}°C avg",
             }
 
-        # Normalise flights: FlightQuote → list with price field
+        # Normalise flights: FlightQuote → list with schedule details
         fq = d.get("flights")
         if fq:
             d["flights"] = [{
                 "origin": fq.get("origin"),
+                "origin_city": fq.get("origin_city", ""),
                 "destination": fq.get("destination"),
+                "destination_city": fq.get("destination_city", ""),
+                "destination_airport": fq.get("destination_airport", ""),
+                "departure_time": fq.get("departure_time", ""),
+                "arrival_time": fq.get("arrival_time", ""),
+                "duration_hours": fq.get("duration_hours"),
+                "frequency": fq.get("frequency", ""),
+                "airline": fq.get("airline", ""),
                 "price": fq.get("price_total"),
                 "currency": fq.get("currency", "USD"),
                 "available": fq.get("available", False),

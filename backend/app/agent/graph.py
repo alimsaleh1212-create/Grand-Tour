@@ -65,6 +65,58 @@ log = logging.getLogger(__name__)
 _MAX_LIVE_CANDIDATES = 3
 
 
+def _repair_truncated_json(text: str) -> str | None:
+    """Attempt to repair a truncated JSON response by discarding incomplete data.
+
+    When Gemini hits the output token limit mid-response, the JSON array is cut
+    off mid-object.  The most reliable strategy is to find the last **complete**
+    JSON object (ending with ``}``) and discard everything after it, then close
+    the surrounding array and wrapper object.
+
+    Recovering even 1–2 destinations out of 5 gives the classifier and
+    live_conditions tools something to work with, which is far better than 0.
+
+    Returns the repaired JSON string, or None if no complete object can be
+    recovered.
+    """
+    if not text or "{" not in text:
+        return None
+
+    # Fast path: already valid JSON.
+    try:
+        json.loads(text)
+        return text
+    except json.JSONDecodeError:
+        pass
+
+    # Find the last complete object boundary: "}," ends one object and
+    # starts another.  Everything before that "}" is recoverable.
+    last_complete = text.rfind("},")
+    if last_complete != -1:
+        truncated = text[: last_complete + 1] + "]}"
+        try:
+            parsed = json.loads(truncated)
+            items = parsed.get("items", []) if isinstance(parsed, dict) else parsed
+            if isinstance(items, list) and len(items) >= 1:
+                return truncated
+        except json.JSONDecodeError:
+            pass
+
+    # Try the last } that might end the first (and only partial) object.
+    last_brace = text.rfind("}")
+    if last_brace != -1:
+        truncated = text[: last_brace + 1] + "]}"
+        try:
+            parsed = json.loads(truncated)
+            items = parsed.get("items", []) if isinstance(parsed, dict) else parsed
+            if isinstance(items, list) and len(items) >= 1:
+                return truncated
+        except json.JSONDecodeError:
+            pass
+
+    return None
+
+
 @dataclass
 class AgentDeps:
     """All singletons injected into the agent at construction time.
@@ -123,7 +175,14 @@ def build_agent(deps: AgentDeps) -> Any:
         return {"retrieved_hits": hits, "errors": errors}
 
     async def extract_node(state: AgentState) -> dict[str, Any]:
-        """Cheap LLM extracts DestinationFeatures list from retrieved chunks."""
+        """Cheap LLM extracts DestinationFeatures list from retrieved chunks.
+
+        Uses a higher token limit (8192) than the default because extracting
+        3-5 destinations with 15 fields each can exceed 2048 tokens.  If the
+        JSON response is truncated (Gemini hit the output limit), we attempt
+        to repair it by closing open strings, arrays, and objects so that
+        partial results (even 1-2 destinations) can still feed the classifier.
+        """
         hits = state.get("retrieved_hits") or []
         question = state.get("sanitized_question", "")
         tokens_in: int = state.get("tokens_in") or 0
@@ -138,31 +197,49 @@ def build_agent(deps: AgentDeps) -> Any:
             system_prompt=SYSTEM_FEATURE_EXTRACTOR,
             user_prompt=user_prompt,
             response_schema=ExtractedDestinations,
+            max_output_tokens=8192,
         )
         tokens_in += generation.tokens_in
         tokens_out += generation.tokens_out
 
         raw_features: list[dict[str, Any]] = []
         if generation.parsed is not None:
-            # Schema-validated path — Gemini serialised correctly
             raw_features = [item.model_dump() for item in generation.parsed.items]
         else:
-            # Fallback: text was returned but schema parse failed — try manual parse
+            text = generation.text.strip()
+            if text.startswith("```"):
+                text = text.split("\n", 1)[-1].rsplit("```", 1)[0]
             try:
-                text = generation.text.strip()
-                if text.startswith("```"):
-                    text = text.split("\n", 1)[-1].rsplit("```", 1)[0]
                 parsed_json = json.loads(text)
                 if isinstance(parsed_json, dict) and "items" in parsed_json:
                     raw_features = parsed_json["items"]
                 elif isinstance(parsed_json, list):
                     raw_features = parsed_json
-            except (json.JSONDecodeError, ValueError) as exc:
-                errors.append(f"extract_node JSON parse failed: {exc}")
-                log.warning(
-                    "agent.extract.parse_failed",
-                    extra={"error": str(exc), "text_preview": generation.text[:200]},
-                )
+            except json.JSONDecodeError:
+                repaired = _repair_truncated_json(text)
+                if repaired is not None:
+                    try:
+                        parsed_json = json.loads(repaired)
+                        if isinstance(parsed_json, dict) and "items" in parsed_json:
+                            raw_features = parsed_json["items"]
+                        elif isinstance(parsed_json, list):
+                            raw_features = parsed_json
+                        log.info(
+                            "agent.extract.repaired",
+                            extra={"candidates": len(raw_features)},
+                        )
+                    except json.JSONDecodeError as exc:
+                        errors.append(f"extract_node JSON parse failed: {exc}")
+                        log.warning(
+                            "agent.extract.parse_failed",
+                            extra={"error": str(exc), "text_preview": generation.text[:200]},
+                        )
+                else:
+                    errors.append("extract_node JSON truncated beyond repair")
+                    log.warning(
+                        "agent.extract.parse_failed",
+                        extra={"error": "truncated beyond repair", "text_preview": generation.text[:200]},
+                    )
 
         log.info(
             "agent.extract.success",
