@@ -59,7 +59,7 @@ services:
     cap_add:
       - IPC_LOCK
     environment:
-      VAULT_DEV_ROOT_TOKEN_ID: dev-root-token
+      VAULT_DEV_ROOT_TOKEN_ID: ${VAULT_TOKEN}
       VAULT_DEV_LISTEN_ADDRESS: "0.0.0.0:8200"
     ports:
       - "8200:8200"
@@ -82,7 +82,7 @@ services:
     env_file: .env
     environment:
       VAULT_ADDR: http://vault:8200
-      VAULT_TOKEN: dev-root-token
+      VAULT_TOKEN: ${VAULT_TOKEN}
     networks:
       - stp_network
     depends_on:
@@ -144,9 +144,9 @@ services:
       # ── Webhook delivery policy (not URLs — those are secrets in Vault) ──
       WEBHOOK_TIMEOUT_SECONDS: ${WEBHOOK_TIMEOUT_SECONDS:-5.0}
       WEBHOOK_MAX_RETRIES: ${WEBHOOK_MAX_RETRIES:-1}
-      # ── Vault connection (non-secret: dev coordinates, not a real secret) ─
+      # ── Vault connection (token must match VAULT_TOKEN in .env; never commit real tokens) ─
       VAULT_ADDR: http://vault:8200
-      VAULT_TOKEN: dev-root-token
+      VAULT_TOKEN: ${VAULT_TOKEN}
     ports:
       - "8002:8000"
     networks:
