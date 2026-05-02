@@ -4,6 +4,7 @@ import Composer from "./Composer";
 import HistorySidebar from "./HistorySidebar";
 import BookingModal from "./BookingModal";
 import { RetrieveCards, ClassifyCards, LiveCards, TravelPlanAnswer } from "./TravelPlanCards";
+import DestinationMap from "./DestinationMap";
 import { streamChat, notifyRun } from "@/api/client";
 import type { SseChunk, SseClassification, SseLiveConditions, BookingOut } from "@/api/client";
 import ToolBadge from "@/components/ToolBadge";
@@ -302,6 +303,10 @@ function AgentBubble({ msg, onBookFlight }: {
 
         {msg.classifications && msg.classifications.length > 0 && (
           <ClassifyCards classifications={msg.classifications} />
+        )}
+
+        {msg.liveData && msg.liveData.length > 0 && msg.liveData.some(d => d.latitude != null) && (
+          <DestinationMap destinations={msg.liveData} />
         )}
 
         {msg.liveData && msg.liveData.length > 0 && (

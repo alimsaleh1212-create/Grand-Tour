@@ -86,6 +86,8 @@ export type SseClassification = {
 
 export type SseLiveConditions = {
   destination_name?: string;
+  latitude?: number;
+  longitude?: number;
   weather?: {
     description?: string;
     temp_c?: number;

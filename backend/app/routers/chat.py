@@ -147,6 +147,8 @@ def _serialise_live(
             }] if fq.get("available") else []
 
         d["destination_name"] = dest_name
+        d["latitude"] = raw_features[i].get("latitude") if i < len(raw_features) else None
+        d["longitude"] = raw_features[i].get("longitude") if i < len(raw_features) else None
         out.append(d)
     return out
 
